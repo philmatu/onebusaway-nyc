@@ -251,7 +251,7 @@ OBA.Popups = (function() {
 		// (end header)
 		html += '</p>';
 		html += '</div>';
-		
+		html += getOccupancyForBus(activity.MonitoredVehicleJourney);
 		// service available at stop
 		if(typeof activity.MonitoredVehicleJourney.MonitoredCall === 'undefined' && (
 			(typeof activity.MonitoredVehicleJourney.OnwardCalls === 'undefined'
@@ -284,6 +284,13 @@ OBA.Popups = (function() {
 					} else {
 						html += onwardCall.Extensions.Distances.PresentableDistance;
 					}
+
+                    if(typeof onwardCall.AimedArrivalTime !== 'undefined' && onwardCall.AimedArrivalTime !== null) {
+                        html += "scheduled: " + onwardCall.AimedArrivalTime;
+                        html += ", " + onwardCall.Extensions.Distances.PresentableDistance;
+                    } else {
+                        html += onwardCall.Extensions.Distances.PresentableDistance;
+                    }
 
 					html += '</span></li>';
 				});
@@ -322,6 +329,45 @@ OBA.Popups = (function() {
 		return content.get(0);
 	}
 
+	function getOccupancy(MonitoredVehicleJourney){
+		  
+		   if(MonitoredVehicleJourney.Occupancy === undefined)
+			   return '';
+		 
+		   var occupancyLoad = "N/A";
+		   
+		   console.log('occupancy: '+ MonitoredVehicleJourney.Occupancy);
+		   
+		   if(MonitoredVehicleJourney.Occupancy == "seatsAvailable")
+			   occupancyLoad = '<span class="apcicong"> </span>';
+		   else if(MonitoredVehicleJourney.Occupancy == "standingAvailable")
+			   occupancyLoad = '<span class="apcicony"> </span>';
+		   else if(MonitoredVehicleJourney.Occupancy == "full")
+			   occupancyLoad = '<span class="apciconr"> </span>';
+		  
+		   return occupancyLoad;
+		}
+		
+	
+	function getOccupancyForBus(MonitoredVehicleJourney){
+	    var occupancyLoad = getOccupancy(MonitoredVehicleJourney);
+	    if (occupancyLoad == '')
+			return '';
+		else
+			return '<p><span class="service">Occupancy: </span> <span class="occupancy">'+occupancyLoad+'</span> </p>';
+			
+	}
+	
+	function getOccupancyForStop(MonitoredVehicleJourney){
+		var occupancyLoad = getOccupancy(MonitoredVehicleJourney);
+		if (occupancyLoad == '')
+			return '';
+		else
+			return occupancyLoad;
+	}
+	
+	
+	
 	function getStopContentForResponse(r, popupContainerId, marker, routeFilter) {
 		var siri = r.siri;
 		var stopResult = r.stop;
@@ -474,6 +520,7 @@ OBA.Popups = (function() {
 						var prevTripLateDepartureText = " <span class='not_bold'>(+ scheduled layover at terminal)</span>";
 						
 						var distance = monitoredVehicleJourney.MonitoredCall.Extensions.Distances.PresentableDistance;
+						var loadOccupancy = getOccupancyForStop(monitoredVehicleJourney);
 						
 						var timePrediction = null;
 						if(typeof monitoredVehicleJourney.MonitoredCall.ExpectedArrivalTime !== 'undefined' 
@@ -483,7 +530,19 @@ OBA.Popups = (function() {
 									updateTimestampReference);
 						}
 
-						var layover = false;
+                        var scheduledArrivalTime = null;
+                        if(typeof monitoredVehicleJourney.MonitoredCall.AimedArrivalTime !== 'undefined'
+                            && monitoredVehicleJourney.MonitoredCall.AimedArrivalTime !== null) {
+                            scheduledArrivalTime =  monitoredVehicleJourney.MonitoredCall.AimedArrivalTime;
+                        }
+
+                        var tripId = null;
+                        if(typeof monitoredVehicleJourney.FramedVehicleJourneyRef.DatedVehicleJourneyRef !== 'undefined'
+                            && monitoredVehicleJourney.FramedVehicleJourneyRef.DatedVehicleJourneyRef !== null) {
+                            tripId =  monitoredVehicleJourney.FramedVehicleJourneyRef.DatedVehicleJourneyRef;
+                        }
+
+                        var layover = false;
 						if(typeof monitoredVehicleJourney.ProgressStatus !== 'undefined' 
 							&& monitoredVehicleJourney.ProgressStatus.indexOf("layover") !== -1) {
 							layover = true;
@@ -523,8 +582,14 @@ OBA.Popups = (function() {
 						}
 						
 						// time mode
+                        if(tripId != null) {
+                            html += '<li class="arrival' + lastClass + '">' + 'tripId: ' + tripId + '</li>';
+                        }
+                        if(scheduledArrivalTime != null) {
+                            html += '<li class="arrival' + lastClass + '">' + 'scheduled: ' + scheduledArrivalTime + '</li>';
+                        }
 						if(timePrediction != null) {
-							timePrediction += ", " + distance;
+							timePrediction += ", " + distance + loadOccupancy;
 							
 							if(isDepartureTimeAvailable){
 								if(layover === true) {
@@ -540,6 +605,11 @@ OBA.Popups = (function() {
 									} else {
 										timePrediction += prevTripLateDepartureText;
 									}
+								}
+							}
+							else{
+								if(layover === true) {
+									timePrediction += layoverLateDepartureText;	
 								}
 							}
 

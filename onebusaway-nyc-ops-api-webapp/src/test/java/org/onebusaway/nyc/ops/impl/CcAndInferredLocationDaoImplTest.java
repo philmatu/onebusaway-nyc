@@ -17,6 +17,9 @@ package org.onebusaway.nyc.ops.impl;
 
 import static org.junit.Assert.*;
 
+import org.hibernate.Transaction;
+import org.hibernate.service.ServiceRegistry;
+import org.hibernate.service.ServiceRegistryBuilder;
 import org.onebusaway.nyc.ops.impl.CcAndInferredLocationDaoImpl;
 import org.onebusaway.nyc.report.impl.CcAndInferredLocationFilter;
 import org.onebusaway.nyc.report.impl.CcLocationCache;
@@ -24,13 +27,11 @@ import org.onebusaway.nyc.report.impl.RecordValidationServiceImpl;
 import org.onebusaway.nyc.report.model.ArchivedInferredLocationRecord;
 import org.onebusaway.nyc.report.model.CcAndInferredLocationRecord;
 import org.onebusaway.nyc.report.model.CcLocationReportRecord;
-import org.hibernate.HibernateException;
 import org.hibernate.Query;
 import org.hibernate.Session;
 import org.hibernate.SessionFactory;
-import org.hibernate.cfg.AnnotationConfiguration;
 import org.hibernate.cfg.Configuration;
-import org.springframework.orm.hibernate3.HibernateCallback;
+
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -52,9 +53,11 @@ public class  CcAndInferredLocationDaoImplTest {
   @Before
   public void setup() throws IOException {
 
-    Configuration config = new AnnotationConfiguration();
-    config = config.configure("org/onebusaway/nyc/ops/hibernate-configuration.xml");
-    _sessionFactory = config.buildSessionFactory();
+      Configuration config = new Configuration();
+      config = config.configure("org/onebusaway/nyc/ops/hibernate-configuration.xml");
+      ServiceRegistry serviceRegistry = new ServiceRegistryBuilder().applySettings(
+              config.getProperties()). buildServiceRegistry();
+      _sessionFactory = config.buildSessionFactory(serviceRegistry);
 
     _cache = new CcLocationCache(10);
     
@@ -73,6 +76,8 @@ public class  CcAndInferredLocationDaoImplTest {
   
   @Test
   public void test() throws Exception {
+
+    Transaction t = getSession().beginTransaction();
 
     assertEquals(0, getNumberOfRecords());
 
@@ -117,6 +122,8 @@ public class  CcAndInferredLocationDaoImplTest {
     }
     
     assertTrue(foundMatch);
+
+    t.commit();
   }
   
   private CcLocationReportRecord getCcRecord() {
@@ -179,28 +186,23 @@ public class  CcAndInferredLocationDaoImplTest {
     return record;
   }    
  
- @SuppressWarnings("unchecked")
-private int getNumberOfRecords() {
-    @SuppressWarnings("rawtypes")
-    Long count = (Long) _dao.getHibernateTemplate().execute(new HibernateCallback() {
-	public Object doInHibernate(Session session) throws HibernateException {
-        Query query = session.createQuery("select count(*) from ArchivedInferredLocationRecord");
-	return (Long)query.uniqueResult();
-	}
-    });
-    return count.intValue();
+
+  @SuppressWarnings("unchecked")
+  private int getNumberOfRecords() {
+      Query query = getSession().createQuery("select count(*) from ArchivedInferredLocationRecord");
+      Long count = (Long) query.uniqueResult();
+      return count.intValue();
+
   }
 
   @SuppressWarnings("unchecked")
-private int getNumberOfCurrentRecords() {
-    @SuppressWarnings("rawtypes")
-    Long count = (Long) _dao.getHibernateTemplate().execute(new HibernateCallback() {
-	public Object doInHibernate(Session session) throws HibernateException {
-        Query query = session.createQuery("select count(*) from CcAndInferredLocationRecord");
-	return (Long)query.uniqueResult();
-	}
-    });
-    return count.intValue();
+  private int getNumberOfCurrentRecords() {
+      Query query = getSession().createQuery("select count(*) from CcAndInferredLocationRecord");
+      Long count = (Long) query.uniqueResult();
+      return count.intValue();
   }
 
+  private Session getSession(){
+        return _sessionFactory.getCurrentSession();
+    }
 }

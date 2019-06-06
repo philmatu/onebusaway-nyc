@@ -20,17 +20,20 @@ import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Date;
 import java.util.GregorianCalendar;
 import java.util.List;
 import java.util.Map;
 import java.util.TimeZone;
+import java.util.TimerTask;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.ThreadPoolExecutor;
 
 import javax.annotation.PostConstruct;
 import javax.annotation.PreDestroy;
@@ -48,6 +51,7 @@ import org.onebusaway.nyc.transit_data.model.NycQueuedInferredLocationBean;
 import org.onebusaway.nyc.transit_data.model.NycVehicleManagementStatusBean;
 import org.onebusaway.nyc.transit_data.services.NycTransitDataService;
 import org.onebusaway.nyc.transit_data_federation.impl.tdm.DummyOperatorAssignmentServiceImpl;
+import org.onebusaway.nyc.transit_data_federation.impl.vtw.DummyVehiclePulloutService;
 import org.onebusaway.nyc.transit_data_federation.model.bundle.BundleItem;
 import org.onebusaway.nyc.transit_data_federation.services.bundle.BundleManagementService;
 import org.onebusaway.nyc.transit_data_federation.services.predictions.PredictionIntegrationService;
@@ -79,6 +83,7 @@ import org.onebusaway.transit_data_federation.services.transit_graph.TransitGrap
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.ApplicationContext;
 import org.springframework.stereotype.Component;
 
@@ -86,6 +91,7 @@ import tcip_3_0_5_local.NMEA;
 import tcip_final_3_0_5_1.CcLocationReport;
 import tcip_final_3_0_5_1.CcLocationReport.EmergencyCodes;
 
+import com.amazonaws.services.cloudwatch.model.StandardUnit;
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableMultiset;
 import com.google.common.collect.Multiset;
@@ -101,7 +107,7 @@ public class VehicleLocationInferenceServiceImpl implements
 
   private static final DateTimeFormatter XML_DATE_TIME_FORMAT = ISODateTimeFormat.dateTimeParser();
 
-  private static final long MIN_RECORD_INTERVAL = 3 * 1000; // 5 seconds
+  private static final long MIN_RECORD_INTERVAL = 3 * 1000; // 3 seconds
 
   @Autowired
   private ObservationCache _observationCache;
@@ -129,19 +135,25 @@ public class VehicleLocationInferenceServiceImpl implements
 
   @Autowired
   protected ConfigurationService _configurationService;
-
+  
   private BundleItem _lastBundle = null;
 
   private ExecutorService _executorService;
 
+  private ThreadPoolExecutor _threadPoolExecutor;
+
   private int _skippedUpdateLogCounter = 0;
 
   private int _numberOfProcessingThreads = 2 + (Runtime.getRuntime().availableProcessors() * 20);
-
+  
   private final ConcurrentMap<AgencyAndId, VehicleInferenceInstance> _vehicleInstancesByVehicleId = new ConcurrentHashMap<AgencyAndId, VehicleInferenceInstance>();
-
+    
   private final ConcurrentMap<AgencyAndId, Long> _timeReceivedByVehicleId = new ConcurrentHashMap<AgencyAndId, Long>(
       10000);
+
+  private final ConcurrentMap<AgencyAndId, Long> _timeSpentByVehicleId = new ConcurrentHashMap<AgencyAndId, Long>(
+          10000);
+
 
   private ApplicationContext _applicationContext;
 
@@ -181,9 +193,11 @@ public class VehicleLocationInferenceServiceImpl implements
           "numberOfProcessingThreads must be positive");
 
     _log.info("Creating thread pool of size=" + _numberOfProcessingThreads);
-    _executorService = Executors.newFixedThreadPool(_numberOfProcessingThreads);
-  }
+    _threadPoolExecutor = (ThreadPoolExecutor) Executors.newFixedThreadPool(_numberOfProcessingThreads);
+    _executorService = _threadPoolExecutor;
 
+  }
+  
   @PreDestroy
   public void stop() {
     _executorService.shutdownNow();
@@ -351,7 +365,6 @@ public class VehicleLocationInferenceServiceImpl implements
           r.setRmc(sentence);
       }
     }
-
     final DateTime time = XML_DATE_TIME_FORMAT.parseDateTime(message.getTimeReported());
     r.setTime(time.getMillis());
     r.setTimeReceived(new Date().getTime());
@@ -370,9 +383,9 @@ public class VehicleLocationInferenceServiceImpl implements
             formatter.setTimeZone(TimeZone.getTimeZone("GMT"));
 
             final Date fromDRU = formatter.parse(datePart + " " + timePart);
-            final long differenceInSeconds = (fromDRU.getTime() - time.getMillis()) / 1000;
+            final long differenceInSeconds = Math.abs(fromDRU.getTime() - time.getMillis()) / 1000;
 
-            if (differenceInSeconds > 30 * 60) { // 30m
+            if (differenceInSeconds > 30) { // 30 sec
               _log.debug("Vehicle "
                   + vehicleId
                   + " has significant time difference between time from DRU and time from record\n"
@@ -380,6 +393,7 @@ public class VehicleLocationInferenceServiceImpl implements
                   + "Difference in hours: " + (differenceInSeconds / 60 / 60)
                   + "\n" + "Raw timestamp: " + message.getTimeReported() + "\n"
                   + "From RMC: " + datePart + " " + timePart);
+              
             }
           } catch (final ParseException e) {
             _log.debug("Unparseable date: " + datePart + " " + timePart);
@@ -712,101 +726,135 @@ public class VehicleLocationInferenceServiceImpl implements
 
     @Override
     public void run() {
-      try {
-        // operator assignment service in simulation case: returns a 1:1 result
-        // to what the trace indicates is the
-        // true operator assignment.
-        if (_simulation) {
-          final DummyOperatorAssignmentServiceImpl opSvc = new DummyOperatorAssignmentServiceImpl();
+      long start = System.currentTimeMillis();
+      long stop = 0;
+    	try {
+    		if (_simulation) {
+    			setupSimulationBeforeRun();
+    		}
 
-          final String assignedRun = _nycTestInferredLocationRecord.getAssignedRunId();
-          final String operatorId = _nycTestInferredLocationRecord.getOperatorId();
-          if (!Strings.isNullOrEmpty(assignedRun)
-              && !Strings.isNullOrEmpty(operatorId)) {
-            final String[] runParts = assignedRun.split("-");
-            if (runParts.length > 2) {
-              opSvc.setOperatorAssignment(new AgencyAndId(
-                  _nycRawLocationRecord.getVehicleId().getAgencyId(),
-                  operatorId), runParts[1] + "-" + runParts[2], runParts[0]);
+    		// bypass/process record through inference
+    		boolean inferenceSuccess = false;
+    		NycQueuedInferredLocationBean record = null;
+    		if (_nycRawLocationRecord != null) {
+    		  if (_bypass == true) {
+    			record = _inferenceInstance.handleBypassUpdateWithResults(_nycTestInferredLocationRecord);
+  		    } else {
+  		    	record = _inferenceInstance.handleUpdateWithResults(_nycRawLocationRecord);
+  		    	}   
+    		}  
+	    	if (record != null) inferenceSuccess = true;
 
-            } else {
-              opSvc.setOperatorAssignment(new AgencyAndId(
-                  _nycRawLocationRecord.getVehicleId().getAgencyId(),
-                  operatorId), runParts[1], runParts[0]);
+    		if (inferenceSuccess) {
+    			// send input "actuals" as inferred result to output queue to bypass inference process
+    			if (_bypass == true) {
+    				record.setVehicleId(_vehicleId.toString());
+
+    				// fix up the service date if we're shifting the dates of the record to now, since
+    				// the wrong service date will make the TDS not match the trip properly.
+    				if(record.getServiceDate() == 0) {
+    					final GregorianCalendar gc = new GregorianCalendar();
+    					gc.setTime(_nycTestInferredLocationRecord.getTimestampAsDate());
+    					gc.set(Calendar.HOUR_OF_DAY, 0);
+    					gc.set(Calendar.MINUTE, 0);
+    					gc.set(Calendar.SECOND, 0);
+    					record.setServiceDate(gc.getTimeInMillis());
+    				}
+
+    				_outputQueueSenderService.enqueue(record);
+
+    				// send inferred result to output queue
+    			} else {
+    				// add some more properties to the record before sending off
+    				record.setVehicleId(_vehicleId.toString());
+    				record.getManagementRecord().setInferenceEngineIsPrimary(_outputQueueSenderService.getIsPrimaryInferenceInstance());
+    				record.getManagementRecord().setDepotId(_vehicleAssignmentService.getAssignedDepotForVehicleId(_vehicleId));
+    				
+    				// Process TDS Fields - OBANYC-2184 (Previously Archive PostProceess)
+    			    postProcess(record);
+    				
+    				final BundleItem currentBundle = _bundleManagementService.getCurrentBundleMetadata();
+    				if (currentBundle != null) {
+    					record.getManagementRecord().setActiveBundleId(currentBundle.getId());
+    				}
+
+    				_outputQueueSenderService.enqueue(record);
+    			}
+    		}
+    		stop = System.currentTimeMillis();
+          _timeSpentByVehicleId.put(_vehicleId, (stop - start));
+
+            if (_threadPoolExecutor != null && _threadPoolExecutor.getCompletedTaskCount() % 1000 == 0) {
+              _log.warn("processing " + _threadPoolExecutor.getActiveCount()
+                      + " of " +  _numberOfProcessingThreads
+                      + " with " + _vehicleInstancesByVehicleId.size()
+                      + " active vehicles and " + _bundleManagementService.getInferenceProcessingThreadQueueSize()
+                      + " outstanding threads not reaped"
+                      + " with avg processing time " + computeProcessingTime(_timeSpentByVehicleId.values())
+                      + "ms"
+              );
+              _timeSpentByVehicleId.clear();
             }
-          }
-
-          _inferenceInstance.setOperatorAssignmentService(opSvc);
-          _log.warn("Set operator assignment service to dummy for debugging!");
-        }
-
-        // bypass/process record through inference
-        boolean inferenceSuccess = false;
-        NycQueuedInferredLocationBean record = null;
-        if (_nycRawLocationRecord != null) {
-          if (_bypass == true) {
-            record = _inferenceInstance.handleBypassUpdateWithResults(_nycTestInferredLocationRecord);
-          } else {
-            record = _inferenceInstance.handleUpdateWithResults(_nycRawLocationRecord);
-          }
-        }
-        if (record != null)
-          inferenceSuccess = true;
-
-        if (inferenceSuccess) {
-          // send input "actuals" as inferred result to output queue to bypass
-          // inference process
-          if (_bypass == true) {
-            record.setVehicleId(_vehicleId.toString());
-
-            // fix up the service date if we're shifting the dates of the record
-            // to now, since
-            // the wrong service date will make the TDS not match the trip
-            // properly.
-            if (record.getServiceDate() == 0) {
-              final GregorianCalendar gc = new GregorianCalendar();
-              gc.setTime(_nycTestInferredLocationRecord.getTimestampAsDate());
-              gc.set(Calendar.HOUR_OF_DAY, 0);
-              gc.set(Calendar.MINUTE, 0);
-              gc.set(Calendar.SECOND, 0);
-              record.setServiceDate(gc.getTimeInMillis());
-            }
-
-            _outputQueueSenderService.enqueue(record);
-
-            // send inferred result to output queue
-          } else {
-            // add some more properties to the record before sending off
-            record.setVehicleId(_vehicleId.toString());
-            record.getManagementRecord().setInferenceEngineIsPrimary(
-                _outputQueueSenderService.getIsPrimaryInferenceInstance());
-            record.getManagementRecord().setDepotId(
-                _vehicleAssignmentService.getAssignedDepotForVehicleId(_vehicleId));
-
-            // Process TDS Fields - OBANYC-2184 (Previously Archive
-            // PostProceess)
-            postProcess(record);
-
-            final BundleItem currentBundle = _bundleManagementService.getCurrentBundleMetadata();
-            if (currentBundle != null) {
-              record.getManagementRecord().setActiveBundleId(
-                  currentBundle.getId());
-            }
-
-            _outputQueueSenderService.enqueue(record);
-          }
-        }
-      } catch (final ProjectionException e) {
-        // discard this one
-      } catch (final Throwable ex) {
-        _log.error(
-            "Error processing new location record for inference on vehicle "
-                + _vehicleId + ": ", ex);
-        resetVehicleLocation(_vehicleId);
-        _observationCache.purge(_vehicleId);
-      }
+    	} catch (final ProjectionException e) {
+    		// discard this one
+    	} catch (final Throwable ex) {
+    		_log.error("Error processing new location record for inference on vehicle " + _vehicleId + ": ", ex);        
+    		resetVehicleLocation(_vehicleId);
+    		_observationCache.purge(_vehicleId);    	  
+    	}
     }
-  }
+
+    private double computeProcessingTime(Collection<Long> pTimes) {
+      long sum = 0;
+      for (Long pTime : pTimes) {
+        sum += pTime;
+      }
+      return (double)sum / pTimes.size();
+    }
+    /**
+     * If we're running within a simulation context, we need to stub some services into inference instance
+     * so that we can deliver data from the trace file.
+     */
+    private void setupSimulationBeforeRun() {
+      setupDummyOperatorAssignmentService();
+      setupDummyPulloutsService();
+    }
+
+    private void setupDummyPulloutsService() {
+      String assignedBlockId = _nycTestInferredLocationRecord.getAssignedBlockId();
+      DummyVehiclePulloutService pulloutService = new DummyVehiclePulloutService();
+      pulloutService.setVehiclePullout(_nycTestInferredLocationRecord.getVehicleId(), assignedBlockId);
+      _inferenceInstance.setPulloutService(pulloutService);
+    }
+
+    /**
+     * operator assignment service in simulation case: returns a 1:1 result to what the trace indicates is the
+     * true operator assignment.
+     */
+    private void setupDummyOperatorAssignmentService() {
+      final DummyOperatorAssignmentServiceImpl opSvc = new DummyOperatorAssignmentServiceImpl();
+
+      final String assignedRun = _nycTestInferredLocationRecord.getAssignedRunId();
+      final String operatorId = _nycTestInferredLocationRecord.getOperatorId();
+      if (!Strings.isNullOrEmpty(assignedRun) && !Strings.isNullOrEmpty(operatorId)) {
+      	final String[] runParts = assignedRun.split("-");
+      	if (runParts.length > 2) {
+          opSvc.setOperatorAssignment(new AgencyAndId(
+              _nycRawLocationRecord.getVehicleId().getAgencyId(), operatorId),
+              runParts[1] + "-" + runParts[2], runParts[0]);
+      	  
+      	} else {
+      	  opSvc.setOperatorAssignment(new AgencyAndId(
+      	      _nycRawLocationRecord.getVehicleId().getAgencyId(), operatorId),
+      	      runParts[1], runParts[0]);
+      	}
+      }
+
+      _inferenceInstance.setOperatorAssignmentService(opSvc);
+      _log.warn("Operator assignment service has been set to dummy for simulation.");
+    }
+
+  }  
 
   @Override
   public void setSeeds(long cdfSeed, long factorySeed) {

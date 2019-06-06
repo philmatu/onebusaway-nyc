@@ -121,10 +121,12 @@ public class FileServiceImpl implements FileService, ServletContextAware {
 	@Override
 	public void setup() {
 		try {
+		    _log.info("setting up s3user=" + _username);
 			_credentials = new BasicAWSCredentials(_username, _password);
 			_s3 = new AmazonS3Client(_credentials);
+			_log.info("setup complete");
 		} catch (Throwable t) {
-		  _log.error("FileServiceImpl setup failed, likely due to missing or invalid credentials");
+		    _log.error("FileServiceImpl setup failed, likely due to missing or invalid credentials");
 			_log.error(t.toString());
 		}
 
@@ -209,7 +211,7 @@ public class FileServiceImpl implements FileService, ServletContextAware {
 
 		ObjectListing listing = null;
 		do {
-			if (listing == null) { 
+			if (listing == null) {
 				listing = _s3.listObjects(request);
 				if (listing.getCommonPrefixes() != null) {
 					// short circuit if common prefixes works

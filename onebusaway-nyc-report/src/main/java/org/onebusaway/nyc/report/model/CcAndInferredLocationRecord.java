@@ -94,6 +94,7 @@ public class CcAndInferredLocationRecord implements Serializable {
     setPreviousScheduledStopDistance(inferred.getPreviousScheduledStopDistance());
     setScheduleDeviation(inferred.getScheduleDeviation());
     setAssignedRunId(inferred.getAssignedRunId());
+    setAssignedBlockId(inferred.getAssignedBlockId());
 
   }
 
@@ -193,7 +194,7 @@ public class CcAndInferredLocationRecord implements Serializable {
   @Column(nullable = false, name = "inferred_status", length = 32)
   private String inferredStatus;
 
-  @Column(nullable = false, name = "inference_is_formal")
+  @Column(nullable = false, name = "inference_is_formal", columnDefinition="BIT")
   private boolean inferenceIsFormal;
 
   @Column(nullable = true, columnDefinition = "DECIMAL(14,6)", name = "distance_along_block")
@@ -222,6 +223,9 @@ public class CcAndInferredLocationRecord implements Serializable {
 
   @Column(nullable = true, name = "assigned_run_id", length = 16)
   private String assignedRunId = null;
+
+  @Column(nullable = true, name = "assigned_block_id", length = 64)
+  private String assignedBlockId = null;
 
   public String getUUID() {
     return uuid;
@@ -527,6 +531,14 @@ public Integer getScheduleDeviation() {
 
   public String getAssignedRunId() {
     return assignedRunId;
+  }
+
+  public String getAssignedBlockId() {
+    return assignedBlockId;
+  }
+
+  public void setAssignedBlockId(String assignedBlockId) {
+    this.assignedBlockId = assignedBlockId;
   }
 
   private String toISODate(Date date) {

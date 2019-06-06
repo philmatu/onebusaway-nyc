@@ -2,8 +2,8 @@
 <beans xmlns="http://www.springframework.org/schema/beans" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
     xmlns:context="http://www.springframework.org/schema/context"
     xsi:schemaLocation="
-        http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-2.5.xsd
-        http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context-2.5.xsd">
+        http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+        http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd">
 
     <import resource="classpath:org/onebusaway/nyc/vehicle_tracking/webapp/application-context-webapp.xml" />
 
@@ -12,6 +12,8 @@
       <constructor-arg type="java.lang.Integer" value="80" />
       <constructor-arg type="java.lang.String" value="/api/" />
     </bean>
+    
+    <bean id="vehiclePulloutService" class="org.onebusaway.nyc.transit_data_federation.impl.vtw.DummyVehiclePulloutService" />
 
     <!-- Database Connection Configuration -->
     <bean id="dataSource" class="org.springframework.jdbc.datasource.DriverManagerDataSource">
@@ -60,7 +62,7 @@
 	<!--  Time Queue Configuration -->
 	<!--  This option integrates with an external time prediction queue -->
 	<bean id="timeInputQueue" class="org.onebusaway.nyc.transit_data_federation.impl.predictions.QueuePredictionIntegrationServiceImpl">
-		<property name="disable" value="true"/>
+		<property name="status" value="DISABLED"/>
 	</bean>
 	
   	<bean id="inferenceOutputQueue" class="org.onebusaway.nyc.vehicle_tracking.impl.queue.DummyOutputQueueSenderServiceImpl">
@@ -81,4 +83,12 @@
                 <property name="standaloneMode" value="${bundle.mode.standalone}" />
     </bean>
 
+    <!-- GTFS-Sometimes -->
+    <context:component-scan base-package="org.onebusaway.transit_data_federation.impl.realtime.gtfs_sometimes.impl"/>
+    <context:component-scan base-package="org.onebusaway.transit_data_federation.bundle.tasks.transit_graph"/>
+    <bean id="gtfsSometimesClient" class="org.onebusaway.transit_data_federation.impl.realtime.gtfs_sometimes.GtfsSometimesJsonClientImpl">
+        <property name="url" value="file://${onebusaway_prefix}/src/integration-test/resources/gtfs-sometimes/feed.json" />
+        <property name="transitDataService" ref="nycTransitDataServiceImpl" />
+    </bean>
+    <bean class="org.springframework.scheduling.concurrent.ScheduledExecutorFactoryBean" />
 </beans>

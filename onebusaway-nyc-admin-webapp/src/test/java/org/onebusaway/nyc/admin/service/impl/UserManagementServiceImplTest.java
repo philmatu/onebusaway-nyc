@@ -21,7 +21,7 @@ import org.onebusaway.users.model.UserRole;
 import org.onebusaway.users.services.StandardAuthoritiesService;
 import org.onebusaway.users.services.UserDao;
 import org.onebusaway.users.services.UserService;
-import org.springframework.security.providers.encoding.PasswordEncoder;
+import org.springframework.security.authentication.encoding.PasswordEncoder;
 
 /**
  * Tests {@link UserManagementServiceImpl}
@@ -132,7 +132,7 @@ public class UserManagementServiceImplTest {
 		
 		buildUserDetail(userId, userDetail, "password");
 		
-		when(userService.getUserForId(userId)).thenReturn(user);
+		when(userDao.getUserForId(userId)).thenReturn(user);
 		
 		when(passwordEncoder.encodePassword("password", "admin")).thenReturn(credentials);
 		
@@ -177,7 +177,7 @@ public class UserManagementServiceImplTest {
 		
 		buildUserDetail(userId, userDetail,"password");
 		
-		when(userService.getUserForId(userId)).thenReturn(user);
+		when(userDao.getUserForId(userId)).thenReturn(user);
 		
 		when(passwordEncoder.encodePassword("password", "admin")).thenReturn(credentials);
 		
@@ -212,7 +212,7 @@ public class UserManagementServiceImplTest {
 		
 		buildUserDetail(userId, userDetail, "");
 		
-		when(userService.getUserForId(userId)).thenReturn(user);
+		when(userDao.getUserForId(userId)).thenReturn(user);
 		
 		when(user.getUserIndices()).thenReturn(userIndices);
 		when(user.getRoles()).thenReturn(userRoles);
@@ -256,7 +256,7 @@ public class UserManagementServiceImplTest {
 		Set<UserIndex> userIndices = new HashSet<UserIndex>();
 		userIndices.add(userIndex);
 		
-		when(userService.getUserForId(userId)).thenReturn(user);
+		when(userDao.getUserForId(userId)).thenReturn(user);
 		when(user.getUserIndices()).thenReturn(userIndices);
 		
 		boolean success = service.deactivateUser(userDetail);

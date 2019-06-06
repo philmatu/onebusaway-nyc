@@ -73,6 +73,36 @@
 	font-weight: bold;
 }
 
+.popup .occupancy {
+	height: 16px;
+	font-weight: bold;	
+	margin-top: 3px;
+}
+
+.popup .apcicong {
+	background-image: url("img/apcicong.png");
+	background-repeat: no-repeat;
+	height: 12px;
+	width: 10px;
+	display: inline-block;
+}
+
+.popup .apcicony {
+	background-image: url("img/apcicony.png");
+	background-repeat: no-repeat;
+	height: 12px;
+	width: 10px;
+	display: inline-block;
+}
+
+.popup .apciconr {
+	background-image: url("img/apciconr.png");
+	background-repeat: no-repeat;
+	height: 12px;
+	width: 10px;
+	display: inline-block;
+}
+
 .popup .meta.stale {
   	color: #d12020;
 }

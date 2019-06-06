@@ -36,6 +36,7 @@ import org.onebusaway.nyc.webapp.actions.m.model.GeocodeResult;
 import org.onebusaway.nyc.webapp.actions.m.model.RouteAtStop;
 import org.onebusaway.nyc.webapp.actions.m.model.RouteResult;
 import org.onebusaway.nyc.webapp.actions.m.model.StopResult;
+import org.onebusaway.nyc.webapp.psa.MessageService;
 import org.onebusaway.transit_data.model.RouteBean;
 import org.onebusaway.transit_data.model.service_alerts.ServiceAlertBean;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -55,6 +56,9 @@ public class IndexAction extends OneBusAwayNYCActionSupport {
 
   @Autowired
   private SearchService _searchService;
+  
+  @Autowired
+  private MessageService _messageService;
 
   private SearchResultCollection _results = new SearchResultCollection();
 
@@ -108,7 +112,8 @@ public class IndexAction extends OneBusAwayNYCActionSupport {
         return SUCCESS;
       }
 
-      _results = _searchService.getSearchResults(_q, factory);
+      String query = ("geocode".equals(_type) && _location != null) ? getLocationString() : _q;
+      _results = _searchService.getSearchResults(query, factory);
 
       // do a bit of a hack with location matches--since we have no map to show
       // locations on,
@@ -296,5 +301,12 @@ public class IndexAction extends OneBusAwayNYCActionSupport {
       return null;
     }
   }
+  
+  public String getPsa() {
+    return _messageService.getMessage();
+  }
 
+  private String getLocationString() {
+    return String.format("%g,%g", _location.getLat(), _location.getLon());
+  }
 }

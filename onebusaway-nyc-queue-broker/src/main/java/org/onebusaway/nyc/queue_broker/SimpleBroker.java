@@ -3,7 +3,7 @@ package org.onebusaway.nyc.queue_broker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.zeromq.ZMQ;
-import org.zeromq.ZMQForwarder;
+import zmq.SocketBase;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -17,6 +17,7 @@ public class SimpleBroker {
 
   private static final int DEFAULT_IN_PORT = 5566;
   private static final int DEFAULT_OUT_PORT = 5567;
+  private static final int HWM_VALUE = 50000; // High Water Mark
   private ExecutorService _executorService = null;
   private int inPort;
   private int outPort;
@@ -54,14 +55,16 @@ public class SimpleBroker {
     subscriber.subscribe(new byte[0]); // was inTopic.getBytes()
 
     ZMQ.Socket publisher = context.socket(ZMQ.PUB);
+
+    //Set to prevent broker memory from growing indefinitely if client falls behind
+    publisher.setHWM(HWM_VALUE);
+
     String outBind = "tcp://*:" + outPort;
 
     logger.info("publishing to queue at " + outBind);
     publisher.bind(outBind);
 
-    _executorService = Executors.newFixedThreadPool(1);
-    ZMQForwarder broker = new ZMQForwarder(context, subscriber, publisher);
-    _executorService.execute(broker);
+    ZMQ.proxy(subscriber, publisher, null);
 
   }
 

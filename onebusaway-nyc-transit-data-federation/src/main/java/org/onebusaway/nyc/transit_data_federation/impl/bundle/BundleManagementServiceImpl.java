@@ -12,8 +12,10 @@ import java.util.List;
 import java.util.Set;
 import java.util.TimerTask;
 import java.util.concurrent.Future;
+import java.util.concurrent.locks.ReentrantLock;
 
 import javax.annotation.PostConstruct;
+import javax.annotation.PreDestroy;
 
 import net.sf.ehcache.CacheManager;
 
@@ -21,6 +23,7 @@ import org.onebusaway.container.refresh.RefreshService;
 import org.onebusaway.container.refresh.Refreshable;
 import org.onebusaway.gtfs.model.AgencyAndId;
 import org.onebusaway.gtfs.model.calendar.ServiceDate;
+import org.onebusaway.gtfs.services.calendar.CalendarService;
 import org.onebusaway.nyc.transit_data.services.NycTransitDataService;
 import org.onebusaway.nyc.transit_data_federation.bundle.model.NycFederatedTransitDataBundle;
 import org.onebusaway.nyc.transit_data_federation.model.bundle.BundleItem;
@@ -34,6 +37,7 @@ import org.onebusaway.transit_data.model.ListBean;
 import org.onebusaway.transit_data_federation.impl.RefreshableResources;
 import org.onebusaway.transit_data_federation.services.AgencyAndIdLibrary;
 import org.onebusaway.transit_data_federation.services.FederatedTransitDataBundle;
+import org.onebusaway.transit_data_federation.services.beans.NearbyStopsBeanService;
 import org.onebusaway.transit_data_federation.services.transit_graph.TransitGraphDao;
 import org.onebusaway.transit_data_federation.services.transit_graph.TripEntry;
 import org.slf4j.Logger;
@@ -62,6 +66,8 @@ public class BundleManagementServiceImpl implements BundleManagementService {
 	private static Logger _log = LoggerFactory.getLogger(BundleManagementServiceImpl.class);
 
 	private List<BundleItem> _allBundles = new ArrayList<BundleItem>();
+	
+	private HashMap<String, BundleItem> _allBundlesMap = new HashMap<String, BundleItem>();
 
 	protected HashMap<String, BundleItem> _applicableBundles = new HashMap<String, BundleItem>();
 
@@ -79,9 +85,19 @@ public class BundleManagementServiceImpl implements BundleManagementService {
 
 	protected BundleStoreService _bundleStore = null;
 	
+	protected BundleStoreService _localBundleStore = null;
+	
 	private int bundleDiscoveryFrequencyMin = 15;
   
-  private int bundleSwitchFrequencyMin = 60;
+	private int bundleSwitchFrequencyMin = 60;
+	
+	private int bundleSwitchFrequencyHour = 1;
+	
+	private boolean bundleCleanupEnabled = false;
+
+	// This is to fix the deadlock problem on startup in some versions of Spring.
+	// see https://issuetracker.camsys.com/browse/OBANYC-2543
+	private ReentrantLock _bundleAccessLock = new ReentrantLock();
 
 	@Autowired
 	private NycTransitDataService _nycTransitDataService;
@@ -105,7 +121,14 @@ public class BundleManagementServiceImpl implements BundleManagementService {
 	private RefreshService _refreshService;
 	
 	@Autowired
+	NearbyStopsBeanService _nearbyStopsBeanService;
+	
+	@Autowired
   private ConfigurationService _configurationService;
+  
+   // This is only used when logging block info at bundle change.
+   @Autowired
+   private CalendarService _calendarService;
 
 	/******
 	 * Getters / Setters
@@ -154,7 +177,12 @@ public class BundleManagementServiceImpl implements BundleManagementService {
 	}
 
 	public void discoverBundles() throws Exception {
-		_allBundles = _bundleStore.getBundles();
+		// bundle validity is checked in bundle store
+		List<BundleItem> potentialBundles = _bundleStore.getBundles();
+		if (potentialBundles != null && !potentialBundles.isEmpty())
+			_allBundles = potentialBundles;
+		else
+			_log.error("No valid bundles from bundle store.");
 	}
 
 	/**
@@ -163,14 +191,26 @@ public class BundleManagementServiceImpl implements BundleManagementService {
 	 */
 	public synchronized void refreshApplicableBundles() {
 		_applicableBundles.clear();
+		_allBundlesMap.clear();
 
 		for(BundleItem bundle : _allBundles) {
-			if(bundle.isApplicableToDate(getServiceDate())) {
+			if(bundle.isApplicableToDate(getServiceDate()) || isBatchMode()) {
 				_log.info("Bundle " + bundle.getId() + " is active for today; adding to list of active bundles.");
 
 				_applicableBundles.put(bundle.getId(), bundle);
 			}
+			_allBundlesMap.put(bundle.getId(),bundle);
 		}
+	}
+
+	public boolean isBatchMode() {
+		// test system property to see if we are running in batch (integration-test) mode
+		// and hence all bundles are applicable
+		if ("true".equals(System.getProperty("org.onebusaway.nyc.tdm.bundle.batchmode"))) {
+			_log.info("batch mode on!");
+			return true;
+		}
+		return false;
 	}
 
 	/**
@@ -193,25 +233,34 @@ public class BundleManagementServiceImpl implements BundleManagementService {
 		changeBundle(bestBundle.getId());
 	}
 	
-	@Refreshable(dependsOn = {"tdm.bundleDiscoveryFrequencyMin", "tdm.bundleSwitchFrequencyMin"})
-  protected void refreshCache() {
-    bundleDiscoveryFrequencyMin = Integer.parseInt(_configurationService.getConfigurationValueAsString(
-        "tdm.bundleDiscoveryFrequencyMin", "15"));
-    bundleSwitchFrequencyMin = Integer.parseInt(_configurationService.getConfigurationValueAsString(
-        "tdm.bundleSwitchFrequencyMin", "60"));
-  }
+	@Refreshable(dependsOn = {"tdm.bundleDiscoveryFrequencyMin", "tdm.bundleSwitchFrequencyMin", "tdm.bundleSwitchFrequencyHour", "tds.bundleCleanupEnabled"})
+	protected void refreshCache() {
+	    bundleDiscoveryFrequencyMin = Integer.parseInt(_configurationService.getConfigurationValueAsString(
+	        "tdm.bundleDiscoveryFrequencyMin", "15"));
+	    bundleSwitchFrequencyMin = Integer.parseInt(_configurationService.getConfigurationValueAsString(
+	        "tdm.bundleSwitchFrequencyMin", "60"));
+	    bundleSwitchFrequencyHour = Integer.parseInt(_configurationService.getConfigurationValueAsString(
+	            "tdm.bundleSwitchFrequencyHour", "1"));
+	    bundleCleanupEnabled = Boolean.parseBoolean(_configurationService.getConfigurationValueAsString(
+	    		"tds.bundleCleanupEnabled", "false"));
+	}
 
 	@PostConstruct
 	protected void setup() throws Exception {
 		if(_standaloneMode == true) {
 			_bundleStore = new LocalBundleStoreImpl(_bundleRootPath);
 		} else {
-			_bundleStore = new TDMBundleStoreImpl(_bundleRootPath, _apiLibrary);      
+			_bundleStore = new TDMBundleStoreImpl(_bundleRootPath, _apiLibrary);
+			_localBundleStore = new LocalBundleStoreImpl(_bundleRootPath);
 		}
+
 		refreshCache();
 		discoverBundles();
 		refreshApplicableBundles();
 		reevaluateBundleAssignment();
+		if(!_standaloneMode && bundleCleanupEnabled){
+			cleanupBundles();
+		}
 
 		if(_taskScheduler != null) {
 			_log.info("Starting bundle discovery and switch threads...");
@@ -221,8 +270,34 @@ public class BundleManagementServiceImpl implements BundleManagementService {
 
 			BundleSwitchUpdateThread switchThread = new BundleSwitchUpdateThread();
 			_taskScheduler.schedule(switchThread, switchThread);
+			
+			_taskScheduler.schedule(switchThread, switchThread);
 		}
 	}	
+
+	public int getBundleDiscoveryFrequencyMin() {
+		return bundleDiscoveryFrequencyMin;
+	}
+
+	public void setBundleDiscoveryFrequencyMin(int bundleDiscoveryFrequencyMin) {
+		this.bundleDiscoveryFrequencyMin = bundleDiscoveryFrequencyMin;
+	}
+
+	public int getBundleSwitchFrequencyMin() {
+		return bundleSwitchFrequencyMin;
+	}
+
+	public void setBundleSwitchFrequencyMin(int bundleSwitchFrequencyMin) {
+		this.bundleSwitchFrequencyMin = bundleSwitchFrequencyMin;
+	}
+	
+	public int getBundleSwitchFrequencyHour() {
+		return bundleSwitchFrequencyHour;
+	}
+
+	public void setBundleSwitchFrequencyHour(int bundleSwitchFrequencyHour) {
+		this.bundleSwitchFrequencyHour = bundleSwitchFrequencyHour;
+	}
 
 	/******
 	 * Service methods
@@ -245,7 +320,7 @@ public class BundleManagementServiceImpl implements BundleManagementService {
 	// Can messages be processed using this bundle and current state?
 	@Override
 	public Boolean bundleIsReady() {
-		return _bundleIsReady;
+		return _bundleIsReady || _bundleAccessLock.isHeldByCurrentThread();
 	}
 
 	// register inference processing thread with the bundle manager--
@@ -258,6 +333,10 @@ public class BundleManagementServiceImpl implements BundleManagementService {
 		if(_inferenceProcessingThreads.size() > MAX_EXPECTED_THREADS) {
 			removeDeadInferenceThreads();
 		}
+	}
+
+	public int getInferenceProcessingThreadQueueSize() {
+		return _inferenceProcessingThreads.size();
 	}
 
 	@Override
@@ -319,13 +398,14 @@ public class BundleManagementServiceImpl implements BundleManagementService {
 			_refreshService.refresh(RefreshableResources.ROUTE_COLLECTION_SEARCH_DATA);
 			_refreshService.refresh(RefreshableResources.STOP_SEARCH_DATA);
 			_refreshService.refresh(RefreshableResources.WALK_PLANNER_GRAPH);
-			_refreshService.refresh(RefreshableResources.BLOCK_INDEX_DATA);
+			_refreshService.refresh(RefreshableResources.BLOCK_INDEX_DATA_BUNDLE);
 			_refreshService.refresh(RefreshableResources.BLOCK_INDEX_SERVICE);
 			_refreshService.refresh(RefreshableResources.STOP_TRANSFER_DATA);
 			_refreshService.refresh(RefreshableResources.SHAPE_GEOSPATIAL_INDEX);
 			_refreshService.refresh(RefreshableResources.STOP_GEOSPATIAL_INDEX);
 			_refreshService.refresh(RefreshableResources.TRANSFER_PATTERNS);
 			_refreshService.refresh(RefreshableResources.NARRATIVE_DATA);
+			_refreshService.refresh(RefreshableResources.REVENUE_STOP_ROUTE_INDEX);
 
 			_refreshService.refresh(NycRefreshableResources.DESTINATION_SIGN_CODE_DATA);
 			_refreshService.refresh(NycRefreshableResources.TERMINAL_DATA);
@@ -350,14 +430,14 @@ public class BundleManagementServiceImpl implements BundleManagementService {
 		_log.info("Garbage collection after bundle switch complete.");
 
 		_currentBundleId = bundleId;
-		_bundleIsReady = true;	
-		_log.info("New bundle is now ready.");
 
-		// need to do after bundle is ready so TDS can not block
+		// use lock so TDS can not block, but other threads cannot access
+		_bundleAccessLock.lock();
 		removeAndRebuildCache();
-		_log.info("Cache rebuild complete.");
+		_bundleAccessLock.unlock();
 
-		return;
+		_bundleIsReady = true;
+		_log.info("New bundle is now ready.");
 	}
 
 	// some kind of event notification system camsys setup? 
@@ -370,52 +450,71 @@ public class BundleManagementServiceImpl implements BundleManagementService {
 	private void removeAndRebuildCache() {
 	  // give subclasses a chance to do work
 	  timingHook();
+		clearCache();
+		rebuildCache();
+	}
+	
+	private void clearCache(){
+	  _log.info("Clearing all caches...");
+    for(CacheManager cacheManager : CacheManager.ALL_CACHE_MANAGERS) {
+      _log.info("Found " + cacheManager.getName()); 
+      for(String cacheName : cacheManager.getCacheNames()) {
+        _log.info(" > Clearing Cache: " + cacheName);
+        cacheManager.getCache(cacheName).flush();
+        cacheManager.clearAllStartingWith(cacheName);
+      }
+      cacheManager.clearAll();
+    }
+    _log.info("Cache clearing complete!");
+	}
+	
+	private void rebuildCache(){
+	  _log.info("Rebuilding caches...");
+    try {
+      
+      List<AgencyWithCoverageBean> agenciesWithCoverage = _nycTransitDataService.getAgenciesWithCoverage();
+      for (AgencyWithCoverageBean agencyWithCoverage : agenciesWithCoverage) {
+        AgencyBean agency = agencyWithCoverage.getAgency();
+        
+        ListBean<String> stopIds = _nycTransitDataService.getStopIdsForAgencyId(agency.getId());
+        for (String stopId : stopIds.getList()) {
+          _nearbyStopsBeanService.getNearbyStops(_nycTransitDataService.getStop(stopId), 100);
+        }
 
-		_log.info("Clearing all caches...");
-		for(CacheManager cacheManager : CacheManager.ALL_CACHE_MANAGERS) { 
-			_log.info("Found " + cacheManager.getName());
-			
-			for(String cacheName : cacheManager.getCacheNames()) {
-				_log.info(" > Cache: " + cacheName);
-				cacheManager.getCache(cacheName).flush();
-				cacheManager.clearAllStartingWith(cacheName);
-			}
-			
-			cacheManager.clearAll(); // why not?
-		}
-		
-		// Rebuild cache
-		try {
-			List<AgencyWithCoverageBean> agenciesWithCoverage = _nycTransitDataService.getAgenciesWithCoverage();
+        ListBean<String> routeIds = _nycTransitDataService.getRouteIdsForAgencyId(agency.getId());
+        for (String routeId : routeIds.getList()) {
+          _nycTransitDataService.getStopsForRoute(routeId);
+        }
+      }
 
-			for (AgencyWithCoverageBean agencyWithCoverage : agenciesWithCoverage) {
-				AgencyBean agency = agencyWithCoverage.getAgency();
+      Set<AgencyAndId> shapeIds = new HashSet<AgencyAndId>();
+      for (TripEntry trip : _transitGraphDao.getAllTrips()) {
+        AgencyAndId shapeId = trip.getShapeId();
+        if (shapeId != null && shapeId.hasValues())
+          shapeIds.add(shapeId);
+      }
 
-				ListBean<String> stopIds = _nycTransitDataService.getStopIdsForAgencyId(agency.getId());
-				for (String stopId : stopIds.getList()) {
-					_nycTransitDataService.getStop(stopId);
-				}
-
-				ListBean<String> routeIds = _nycTransitDataService.getRouteIdsForAgencyId(agency.getId());
-				for (String routeId : routeIds.getList()) {
-					_nycTransitDataService.getStopsForRoute(routeId);
-				}
-			}
-
-			Set<AgencyAndId> shapeIds = new HashSet<AgencyAndId>();
-			for (TripEntry trip : _transitGraphDao.getAllTrips()) {
-				AgencyAndId shapeId = trip.getShapeId();
-				if (shapeId != null && shapeId.hasValues())
-					shapeIds.add(shapeId);
-			}
-
-			for (AgencyAndId shapeId : shapeIds) {
-				_nycTransitDataService.getShapeForId(AgencyAndIdLibrary.convertToString(shapeId));
-			}
-			_log.info("cache clearing complete!");
-		} catch (Exception e) {
-			_log.error("Exception during cache rebuild: ", e.getMessage());
-		}
+      for (AgencyAndId shapeId : shapeIds) {
+        _nycTransitDataService.getShapeForId(AgencyAndIdLibrary.convertToString(shapeId));
+      }
+      
+      listCacheNames(); 
+      
+      _log.info("Cache rebuild complete!");
+ 
+    } catch (Exception e) {
+      _log.error("Exception during cache rebuild: ", e.getMessage());
+    }
+  }
+	
+	private void listCacheNames(){
+	  for(CacheManager cacheManager : CacheManager.ALL_CACHE_MANAGERS) { 
+      _log.info("Found " + cacheManager.getName());
+      
+      for(String cacheName : cacheManager.getCacheNames()) {
+        _log.info(" > Cache: " + cacheName);
+      }
+    }
 	}
 
 	private void removeDeadInferenceThreads() {
@@ -450,7 +549,11 @@ public class BundleManagementServiceImpl implements BundleManagementService {
 		public void run() {     
 			try {
 				refreshApplicableBundles();
-				reevaluateBundleAssignment();  
+				reevaluateBundleAssignment();
+				if(!_standaloneMode && bundleCleanupEnabled){
+					cleanupBundles();
+				}
+				
 			} catch(Exception e) {
 				_log.error("Error re-evaluating bundle assignment: " + e.getMessage());
 				e.printStackTrace();
@@ -464,24 +567,29 @@ public class BundleManagementServiceImpl implements BundleManagementService {
 				lastTime = new Date();
 			}
 
-			Calendar calendar = new GregorianCalendar();
-			calendar.setTime(lastTime);
-			calendar.set(Calendar.MILLISECOND, 0);
-			calendar.set(Calendar.SECOND, 1); // go into the next hour/day
-
-			// if we have no current bundle, keep retrying every minute
-			// to see if we're just waiting for the clock to rollover to the next day
-			if(_applicableBundles.size() > 0 && _currentBundleId == null) {
-				int minutes = calendar.get(Calendar.MINUTE);
-				calendar.set(Calendar.MINUTE, minutes + 1);        
-
-			} else {
-			  int minutes = calendar.get(Calendar.MINUTE);
-        calendar.set(Calendar.MINUTE, minutes + bundleSwitchFrequencyMin);            
-			}
-
-			return calendar.getTime();
+			return getNextBundleSwitchTime(lastTime);
 		}   
+	}
+	
+	public Date getNextBundleSwitchTime(Date lastExecutionTime){
+		Calendar calendar = new GregorianCalendar();
+		calendar.setTime(lastExecutionTime);
+		calendar.set(Calendar.MILLISECOND, 0);
+		calendar.set(Calendar.SECOND, 1); // go into the next hour/day
+
+		// if we have no current bundle, keep retrying every minute
+		// to see if we're just waiting for the clock to rollover to the next day		
+		if(_applicableBundles.size() > 0 && _currentBundleId == null) {
+			int minutes = calendar.get(Calendar.MINUTE);
+			calendar.set(Calendar.MINUTE, minutes + 1);        
+
+		} else {
+			calendar.set(Calendar.MINUTE, 0);
+			int hour = calendar.get(Calendar.HOUR);
+			calendar.set(Calendar.HOUR, hour + bundleSwitchFrequencyHour);        
+		}
+
+		return calendar.getTime();
 	}
 
 	protected class BundleDiscoveryUpdateThread extends TimerTask implements Trigger {
@@ -503,19 +611,54 @@ public class BundleManagementServiceImpl implements BundleManagementService {
 		@Override
 		public Date nextExecutionTime(TriggerContext arg0) {
 			Date lastTime = arg0.lastScheduledExecutionTime();
+			
 			if(lastTime == null) {
 				lastTime = new Date();
 			}
 
-			Calendar calendar = new GregorianCalendar();
-			calendar.setTime(lastTime);
-			calendar.set(Calendar.MILLISECOND, 0);
-			calendar.set(Calendar.SECOND, 0);
-
-			int minute = calendar.get(Calendar.MINUTE);
-			calendar.set(Calendar.MINUTE, minute + bundleDiscoveryFrequencyMin);
-
-			return calendar.getTime();
+			return getNextBundleDiscoveryTime(lastTime);
 		}  
 	}
+	
+	public Date getNextBundleDiscoveryTime(Date lastExecutionTime){
+		Calendar calendar = new GregorianCalendar();
+		calendar.setTime(lastExecutionTime);
+		calendar.set(Calendar.MILLISECOND, 0);
+		calendar.set(Calendar.SECOND, 0);
+		
+		int minute = calendar.get(Calendar.MINUTE);
+		int nextExecutionMinute = getNextExecutionMinute(bundleDiscoveryFrequencyMin, minute);
+		calendar.set(Calendar.MINUTE, nextExecutionMinute);
+
+		return calendar.getTime();
+	}
+	
+	public int getNextExecutionMinute(int frequency, int currentMinute){
+		int occurances = currentMinute / frequency;
+		if(occurances < 1){
+			return frequency;
+		}
+		return frequency * (occurances + 1);	
+	}
+	
+	public void cleanupBundles() {
+		try{
+			for(BundleItem bundle : _localBundleStore.getBundles()) {			
+				if(_allBundlesMap.get(bundle.getId()) == null){
+					_bundleStore.deleteBundle(bundle.getId());
+				}
+			}
+		} catch(Exception e){
+			_log.warn("Unable to cleanup bundles",e);
+		}
+	}
+	
+	@PreDestroy
+	public void destroy() {
+		_log.info("destroy");
+		if (_taskScheduler != null) {
+			_taskScheduler.shutdown();
+		}
+	}
+
 }

@@ -257,9 +257,11 @@ public class SearchResultFactoryImpl extends AbstractSearchResultFactoryImpl imp
     
     Map<String, List<String>> results = new HashMap<String, List<String>>();
 
+    Boolean showApc = _configurationService.getConfigurationValueAsBoolean("display.showApc", Boolean.FALSE);
+
     // stop visits
     List<MonitoredStopVisitStructure> visitList = _realtimeService.getMonitoredStopVisitsForStop(
-        stopBean.getId(), 0, System.currentTimeMillis());
+        stopBean.getId(), 0, System.currentTimeMillis(), showApc);
 
     for (MonitoredStopVisitStructure visit : visitList) {
       String routeId = visit.getMonitoredVehicleJourney().getLineRef().getValue();
@@ -302,9 +304,11 @@ public class SearchResultFactoryImpl extends AbstractSearchResultFactoryImpl imp
       RouteBean routeBean) {
     Map<String, List<String>> result = new HashMap<String, List<String>>();
 
-    // stop visits
+    Boolean showApc = _configurationService.getConfigurationValueAsBoolean("display.showApc", Boolean.FALSE);
+
+      // stop visits
     List<VehicleActivityStructure> journeyList = _realtimeService.getVehicleActivityForRoute(
-        routeBean.getId(), null, 0, System.currentTimeMillis());
+        routeBean.getId(), null, 0, System.currentTimeMillis(), showApc);
 
     // build map of stop IDs to list of distance strings
     for (VehicleActivityStructure journey : journeyList) {
@@ -355,32 +359,34 @@ public class SearchResultFactoryImpl extends AbstractSearchResultFactoryImpl imp
 		  SiriExtensionWrapper wrapper = (SiriExtensionWrapper) monitoredCall.getExtensions().getAny();
 		  SiriDistanceExtension distanceExtension = wrapper.getDistances();
 		  String distance = distanceExtension.getPresentableDistance();
+		  String distanceBold = "<strong>" + distance + "</strong>";
 
 		  double minutes = Math.floor((predictedArrival - updateTime) / 60 / 1000);
 		  String timeString = Math.round(minutes) + " minute" + ((Math.abs(minutes) != 1) ? "s" : "");
 		  String timeAndDistance = "<strong>" + timeString + "</strong>," + distance;
-		  
+		  String loadOccupancy = getPresentableOccupancy(journey, updateTime);
+		    
 		  Date originDepartureTime = journey.getOriginAimedDepartureTime();
 
 		  if(originDepartureTime != null && isLayover(progressStatus)){
 			  if(isDepartureOnSchedule(originDepartureTime)){
-				  return timeAndDistance + " (at terminal, scheduled to depart at " + 
+				  return distanceBold + " (at terminal, scheduled to depart at " + 
 						  getFormattedOriginAimedDepartureTime(originDepartureTime) + ")";
 			  }
 			  
-			  return timeAndDistance + " (at terminal)";
+			  return distanceBold + " (at terminal)";
 		  }
 		  else if(originDepartureTime != null && isPrevTrip(progressStatus)) {
 			  if(isDepartureOnSchedule(originDepartureTime)) {
-		    		return timeAndDistance + " (+ layover, scheduled to depart terminal at " 
+		    		return distanceBold + " (+ layover, scheduled to depart terminal at " 
 		    				+ getFormattedOriginAimedDepartureTime(originDepartureTime);
 		    	}
 		    	else{
-		    		return timeAndDistance + " (+ scheduled layover at terminal)";
+		    		return distanceBold + " (+ scheduled layover at terminal)";
 		    	}
 	  	  }
 		  else {
-			  return timeAndDistance;
+			  return timeAndDistance + loadOccupancy;
 		  }
 	  }
 	  
@@ -388,6 +394,35 @@ public class SearchResultFactoryImpl extends AbstractSearchResultFactoryImpl imp
   }
   
   
+  private String getPresentableOccupancy(
+			MonitoredVehicleJourneyStructure journey, long updateTime) {
+	  	
+
+		// if data is old, no occupancy
+		int staleTimeout = _configurationService.getConfigurationValueAsInteger("display.staleTimeout", 120);
+		long age = (System.currentTimeMillis() - updateTime) / 1000;
+
+		if (age > staleTimeout) {
+			return "";
+		}
+		
+		if(journey.getOccupancy() != null) {
+			
+			String loadOccupancy = journey.getOccupancy().toString();
+			loadOccupancy = loadOccupancy.toUpperCase();
+			//TODO: Modify output load text here
+			if(loadOccupancy.equals("SEATS_AVAILABLE") || loadOccupancy.equals("MANY_SEATS_AVAILABLE"))
+				loadOccupancy = "<icon class='apcicong'> </icon>";
+			else if (loadOccupancy.equals("FEW_SEATS_AVAILABLE") || loadOccupancy.equals("STANDING_AVAILABLE"))
+				loadOccupancy = "<icon class='apcicony'> </icon>";
+			else if (loadOccupancy.equals("FULL"))
+				loadOccupancy = "<icon class='apciconr'> </icon>";
+			
+			return " " +loadOccupancy;
+		}else
+			return "";
+
+	}
   
   private String getPresentableDistance(
       MonitoredVehicleJourneyStructure journey, long updateTime,
@@ -398,7 +433,8 @@ public class SearchResultFactoryImpl extends AbstractSearchResultFactoryImpl imp
 
     String message = "";
     String distance = "<strong>" + distanceExtension.getPresentableDistance() + "</strong>";
-
+    String loadOccupancy = getPresentableOccupancy(journey, updateTime);
+    
     NaturalLanguageStringStructure progressStatus = journey.getProgressStatus();
     Date originDepartureTime = journey.getOriginAimedDepartureTime();
     
@@ -439,7 +475,7 @@ public class SearchResultFactoryImpl extends AbstractSearchResultFactoryImpl imp
     if (message.length() > 0)
       return distance + " (" + message + ")";
     else
-      return distance;
+      return distance + loadOccupancy;
   }
   
   private boolean isLayover(NaturalLanguageStringStructure progressStatus){

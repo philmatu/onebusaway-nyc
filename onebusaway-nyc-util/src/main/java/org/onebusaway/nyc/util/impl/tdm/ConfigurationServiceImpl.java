@@ -82,7 +82,8 @@ public class ConfigurationServiceImpl implements ConfigurationService {
 
 	@SuppressWarnings("unused")
 	@PostConstruct
-	private void startUpdateProcess() {
+	private void startUpdateProcess() throws Exception {
+		getConfiguration(); // possible failure, ie if on TDM
 		_taskScheduler.scheduleWithFixedDelay(new UpdateThread(), 5 * 60 * 1000); // 5m
 	}
 
@@ -133,6 +134,18 @@ public class ConfigurationServiceImpl implements ConfigurationService {
 			if (valueAsString == null) return defaultValue;
 			return Integer.parseInt(valueAsString);					
 		} catch(NumberFormatException ex) {
+			return defaultValue;
+		}
+	}
+
+	@Override
+	public Boolean getConfigurationValueAsBoolean(String configurationItemKey, Boolean defaultValue) {
+		try {
+			String defaultValueAsString = ((defaultValue != null) ? defaultValue.toString() : null);
+			String valueAsString = getConfigurationValueAsString(configurationItemKey, defaultValueAsString);
+			if (valueAsString == null) return defaultValue;
+			return Boolean.parseBoolean(valueAsString);
+		} catch(Exception any) {
 			return defaultValue;
 		}
 	}

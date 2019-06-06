@@ -14,11 +14,10 @@
  * the License.
  */
 
-jQuery(function() {
-	
-	jQuery("#generateQRCode").on("click", handleSingleQRCodeClick);
-	jQuery("#generateQRCodeBatch").on("click", handleBatchQRCodeClick);
-});
+jQuery(document).ready(function() { 
+        jQuery("#generateQRCode").click(handleSingleQRCodeClick); 
+        jQuery("#generateQRCodeBatch").click(handleBatchQRCodeClick); 
+}); 
 
 function handleSingleQRCodeClick() {
 	//Hide Batch QR code generation section and show single QR code section

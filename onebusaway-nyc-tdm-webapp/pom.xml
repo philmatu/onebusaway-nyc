@@ -4,7 +4,7 @@
     <parent>
         <artifactId>onebusaway-nyc</artifactId>
         <groupId>org.onebusaway</groupId>
-        <version>2.20.0-SNAPSHOT</version>
+        <version>2.26.1-SNAPSHOT</version>
     </parent>
     <groupId>org.onebusaway</groupId>
     <artifactId>onebusaway-nyc-tdm-webapp</artifactId>
@@ -31,12 +31,17 @@
         <dependency>
             <groupId>org.onebusaway</groupId>
             <artifactId>onebusaway-nyc-tdm-adapters</artifactId>
-            <version>2.20.0-SNAPSHOT</version>
+            <version>2.26.1-SNAPSHOT</version>
         </dependency>
         <dependency>
-            <groupId>org.onebusaway</groupId>
-            <artifactId>onebusaway-nyc-tcip-api</artifactId>
-            <version>2.2.1</version>
+          <groupId>org.onebusaway</groupId>
+          <artifactId>onebusaway-tcip-api-v30</artifactId>
+          <version>1.0.0</version>
+        </dependency>
+        <dependency>
+          <groupId>org.onebusaway</groupId>
+          <artifactId>onebusaway-tcip-api-v40</artifactId>
+          <version>1.0.2</version>
         </dependency>
         <dependency>
             <groupId>com.sun.jersey.contribs</groupId>
@@ -47,6 +52,12 @@
         <dependency>
             <groupId>org.hsqldb</groupId>
             <artifactId>hsqldb</artifactId>
+                <exclusions>
+                        <exclusion>
+                                <groupId>commons-logging</groupId>
+                                <artifactId>commons-logging</artifactId>
+                        </exclusion>
+                </exclusions>
         </dependency>
 
         <dependency>
@@ -67,7 +78,7 @@
         <!-- RMI-like service for wiring up services between VMs -->
         <dependency>
             <groupId>com.caucho</groupId>
-            <artifactId>resin-hessian</artifactId>
+            <artifactId>hessian</artifactId>
         </dependency>
         <dependency>
             <groupId>org.slf4j</groupId>
@@ -91,30 +102,40 @@
         <dependency>
             <groupId>org.onebusaway</groupId>
             <artifactId>onebusaway-nyc-transit-data-federation</artifactId>
-            <version>2.20.0-SNAPSHOT</version>
+            <version>2.26.1-SNAPSHOT</version>
         </dependency>
         <dependency>
             <groupId>org.mockito</groupId>
             <artifactId>mockito-all</artifactId>
         </dependency>
         <dependency>
-          <groupId>quartz</groupId>
-          <artifactId>quartz</artifactId>
-          <version>1.5.2</version>
-        </dependency>
+		    <groupId>org.quartz-scheduler</groupId>
+		    <artifactId>quartz</artifactId>
+		    <version>2.2.3</version>
+		</dependency>
         <!--  for qr code generation -->
             <dependency>
 				<groupId>com.google.zxing</groupId>
 				<artifactId>core</artifactId>
 				<version>2.2</version>
-			</dependency>
-        
+                <exclusions>
+                        <exclusion>
+                                <groupId>commons-logging</groupId>
+                                <artifactId>commons-logging</artifactId>
+                        </exclusion>
+                </exclusions>
+    	</dependency>
+
     	<!--  s3 integration -->
     	<dependency>
       		<groupId>com.amazonaws</groupId>
       		<artifactId>aws-java-sdk</artifactId>
-      		<version>1.3.9</version>
+      		<version>${aws.version}</version>
       		<exclusions>
+        		<exclusion>
+          			<groupId>commons-logging</groupId>
+          			<artifactId>commons-logging</artifactId>
+        		</exclusion>
         		<exclusion>
           			<groupId>org.codehaus.jackson</groupId>
           			<artifactId>jackson-core-asl</artifactId>
@@ -135,6 +156,12 @@
       		<artifactId>servlet-api</artifactId>
       		<scope>provided</scope>
     	</dependency>      
+        <dependency>
+            <groupId>net.javacrumbs.json-unit</groupId>
+            <artifactId>json-unit</artifactId>
+            <version>1.5.1</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
     <profiles>
         <profile>
@@ -146,6 +173,7 @@
                 <tdm.depotAssignsDownloadDir>${tdm.dataPath}/depot_assigns</tdm.depotAssignsDownloadDir> <!-- See DepotAssignmentsSoapDownloadsFilePicker for usage of this. -->
                 <tdm.dscFilesDir>${tdm.dataPath}/dsc</tdm.dscFilesDir> <!-- See DscManualUploadDateTimestampFilePicker for usage of this. -->
                 <tdm.pipoFilename>/vehicle_pipo/UTSPUPUFULL.txt</tdm.pipoFilename>
+                <tdm.rtPipoFilename>/vehicle_pipo/RtSchPullinPulloutList.json</tdm.rtPipoFilename>
                 <tdm.prettyPrintOutput>false</tdm.prettyPrintOutput>
                 <tdm.config.configXmlFile>/var/lib/obanyc/tdm-config/tdm_config.xml</tdm.config.configXmlFile>
                 <tdm.depotIdTranslationConfigFile>${tdm.home}/depot_ids.csv</tdm.depotIdTranslationConfigFile>
@@ -163,6 +191,7 @@
                 <tdm.depotAssignsDownloadDir>${tdm.dataPath}/depot_assigns</tdm.depotAssignsDownloadDir> <!-- See DepotAssignmentsSoapDownloadsFilePicker for usage of this. -->
                 <tdm.dscFilesDir>${tdm.dataPath}/dsc</tdm.dscFilesDir> <!-- See DscManualUploadDateTimestampFilePicker for usage of this. -->
                 <tdm.pipoFilename>UTSPUPUFULL.txt</tdm.pipoFilename>
+                <tdm.rtPipoFilename>/vehicle_pipo/RtSchPullinPulloutList.json</tdm.rtPipoFilename>
                 <tdm.prettyPrintOutput>true</tdm.prettyPrintOutput>
                 <tdm.config.configXmlFile>${tdm.dataPath}/tdm_config.xml</tdm.config.configXmlFile>
                 <tdm.bundlePath>/tmp/bundles</tdm.bundlePath>
@@ -189,6 +218,7 @@
                 <tdm.depotAssignsDownloadDir>${tdm.dataPath}\depot_assigns</tdm.depotAssignsDownloadDir> <!-- See DepotAssignmentsSoapDownloadsFilePicker for usage of this. -->
                 <tdm.dscFilesDir>${tdm.dataPath}\dsc</tdm.dscFilesDir> <!-- See DscManualUploadDateTimestampFilePicker for usage of this. -->
                 <tdm.pipoFilename>CrewAssignSample.csv</tdm.pipoFilename>
+                <tdm.rtPipoFilename>RtSchPullinPulloutList.json</tdm.rtPipoFilename>
                 <tdm.prettyPrintOutput>true</tdm.prettyPrintOutput>
                 <tdm.config.configXmlFile>d:\shared\testconfigfile.xml</tdm.config.configXmlFile>
                 <tdm.depotIdTranslationConfigFile />
@@ -216,6 +246,7 @@
                 <tdm.depotAssignsDownloadDir>${tdm.dataPath}/depot_assigns</tdm.depotAssignsDownloadDir> <!-- See DepotAssignmentsSoapDownloadsFilePicker for usage of this. -->
                 <tdm.dscFilesDir>${tdm.dataPath}/dsc</tdm.dscFilesDir> <!-- See DscManualUploadDateTimestampFilePicker for usage of this. -->
                 <tdm.pipoFilename>/vehicle_pipo/UTSPUPUFULL.txt</tdm.pipoFilename>
+                <tdm.rtPipoFilename>/vehicle_pipo/RtSchPullinPulloutList.json</tdm.rtPipoFilename>
                 <tdm.prettyPrintOutput>false</tdm.prettyPrintOutput>
                 <tdm.config.configXmlFile>/var/lib/obanyc/tdm-config/tdm_config.xml</tdm.config.configXmlFile>
                 <tdm.depotIdTranslationConfigFile>${tdm.home}/depot_ids.csv</tdm.depotIdTranslationConfigFile>
@@ -243,6 +274,7 @@
                 <tdm.depotAssignsDownloadDir>${tdm.dataPath}/depot_assigns</tdm.depotAssignsDownloadDir> <!-- See DepotAssignmentsSoapDownloadsFilePicker for usage of this. -->
                 <tdm.dscFilesDir>${tdm.dataPath}/dsc</tdm.dscFilesDir> <!-- See DscManualUploadDateTimestampFilePicker for usage of this. -->
                 <tdm.pipoFilename>/vehicle_pipo/UTSPUPUFULL.txt</tdm.pipoFilename>
+                <tdm.rtPipoFilename>/vehicle_pipo/RtSchPullinPulloutList.json</tdm.rtPipoFilename>
                 <tdm.prettyPrintOutput>false</tdm.prettyPrintOutput>
                 <tdm.config.configXmlFile>/var/lib/obanyc/tdm-config/tdm_config.xml</tdm.config.configXmlFile>
                 <tdm.depotIdTranslationConfigFile>${tdm.home}/depot_ids.csv</tdm.depotIdTranslationConfigFile>
@@ -270,6 +302,7 @@
                 <tdm.depotAssignsDownloadDir>${tdm.dataPath}/depot_assigns</tdm.depotAssignsDownloadDir> <!-- See DepotAssignmentsSoapDownloadsFilePicker for usage of this. -->
                 <tdm.dscFilesDir>${tdm.dataPath}/dsc</tdm.dscFilesDir> <!-- See DscManualUploadDateTimestampFilePicker for usage of this. -->
                 <tdm.pipoFilename>/vehicle_pipo/UTSPUPUFULL.txt</tdm.pipoFilename>
+                <tdm.rtPipoFilename>/vehicle_pipo/RtSchPullinPulloutList.json</tdm.rtPipoFilename>
                 <tdm.prettyPrintOutput>false</tdm.prettyPrintOutput>
                 <tdm.config.configXmlFile>/var/lib/obanyc/tdm-config/tdm_config.xml</tdm.config.configXmlFile>
                 <tdm.depotIdTranslationConfigFile>${tdm.home}/depot_ids.csv</tdm.depotIdTranslationConfigFile>
@@ -313,6 +346,7 @@
                 <tdm.depotAssignsDownloadDir>${tdm.dataPath}/depot_assigns</tdm.depotAssignsDownloadDir> <!-- See DepotAssignmentsSoapDownloadsFilePicker for usage of this. -->
                 <tdm.dscFilesDir>${tdm.dataPath}/dsc</tdm.dscFilesDir> <!-- See DscManualUploadDateTimestampFilePicker for usage of this. -->
                 <tdm.pipoFilename>/vehicle_pipo/UTSPUPUFULL.txt</tdm.pipoFilename>
+                <tdm.rtPipoFilename>/vehicle_pipo/RtSchPullinPulloutList.json</tdm.rtPipoFilename>
                 <tdm.prettyPrintOutput>false</tdm.prettyPrintOutput>
                 <tdm.config.configXmlFile>/var/lib/obanyc/tdm-config/tdm_config.xml</tdm.config.configXmlFile>
                 <tdm.depotIdTranslationConfigFile>${tdm.home}/depot_ids.csv</tdm.depotIdTranslationConfigFile>
@@ -385,6 +419,7 @@
 					</gitDescribe>
 				</configuration>
 			</plugin>
+<!--
             <plugin>
                 <groupId>org.codehaus.mojo</groupId>
                 <artifactId>hibernate3-maven-plugin</artifactId>
@@ -406,17 +441,14 @@
                     </componentProperties>
                 </configuration>
                 <dependencies>
-          <!-- TODO Remove this now? -->
                     <dependency>
                         <groupId>mysql</groupId>
                         <artifactId>mysql-connector-java</artifactId>
                         <version>5.1.17</version>
                     </dependency>
-          <!-- <dependency> <groupId>org.hsqldb</groupId> <artifactId>hsqldb</artifactId> 
-            <version>2.0.0</version> </dependency> -->
                 </dependencies>
             </plugin>
-
+-->
             <plugin>
                 <groupId>org.mortbay.jetty</groupId>
                 <artifactId>maven-jetty-plugin</artifactId>

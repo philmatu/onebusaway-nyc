@@ -66,6 +66,8 @@ public class VehicleMonitoringV2Action extends MonitoringActionBase
   
   private static final String VEHICLE_REF = "VehicleRef";
   
+  private static final String VERSION = "V2";
+  
   private Siri _response;
   
   private String _cachedResponse = null;
@@ -117,6 +119,7 @@ public class VehicleMonitoringV2Action extends MonitoringActionBase
 	String maxOnwardCallsParam = _request.getParameter(MAX_ONWARD_CALLS);
 	String maxStopVisitsParam = _request.getParameter(MAX_STOP_VISITS);
 	String minStopVisitsParam = _request.getParameter(MIN_STOP_VISITS);
+    boolean showApc = Boolean.parseBoolean(_request.getParameter(SHOW_APC));
     
 	// Error Strings
 	String routeIdsErrorString = "";
@@ -151,7 +154,7 @@ public class VehicleMonitoringV2Action extends MonitoringActionBase
       try{
 	      for (AgencyAndId vehicleId : vehicleIds) {
 	        VehicleActivityStructure activity = _realtimeService.getVehicleActivityForVehicle(
-	            vehicleId.toString(), maximumOnwardCalls, detailLevel, currentTimestamp);
+	            vehicleId.toString(), maximumOnwardCalls, detailLevel, currentTimestamp, showApc);
 	
 	        if (activity != null) {
 	          activities.add(activity);
@@ -175,7 +178,7 @@ public class VehicleMonitoringV2Action extends MonitoringActionBase
       for (AgencyAndId routeId : routeIds) {
         
         List<VehicleActivityStructure> activitiesForRoute = _realtimeService.getVehicleActivityForRoute(
-            routeId.toString(), directionId, maximumOnwardCalls, detailLevel, currentTimestamp);
+            routeId.toString(), directionId, maximumOnwardCalls, detailLevel, currentTimestamp, showApc);
         if (activitiesForRoute != null) {
           activities.addAll(activitiesForRoute);
         }
@@ -210,7 +213,7 @@ public class VehicleMonitoringV2Action extends MonitoringActionBase
       try {
       gaLabel = "All Vehicles";
       
-      int hashKey = _siriCacheService.hash(maximumOnwardCalls, agencyIds, _type);
+      int hashKey = _siriCacheService.hash(maximumOnwardCalls, agencyIds, _type, VERSION);
       
       List<VehicleActivityStructure> activities = new ArrayList<VehicleActivityStructure>();
       if (!_siriCacheService.containsKey(hashKey)) {
@@ -220,7 +223,7 @@ public class VehicleMonitoringV2Action extends MonitoringActionBase
 
           for (VehicleStatusBean v : vehicles.getList()) {
             VehicleActivityStructure activity = _realtimeService.getVehicleActivityForVehicle(
-                v.getVehicleId(), maximumOnwardCalls, detailLevel, currentTimestamp);
+                v.getVehicleId(), maximumOnwardCalls, detailLevel, currentTimestamp, showApc);
 
             if (activity != null) {
               activities.add(activity);

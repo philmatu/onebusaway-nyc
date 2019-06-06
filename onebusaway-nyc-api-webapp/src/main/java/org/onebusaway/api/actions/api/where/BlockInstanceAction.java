@@ -23,6 +23,7 @@ import org.onebusaway.api.model.transit.BeanFactoryV2;
 import org.onebusaway.api.model.transit.EntryWithReferencesBean;
 import org.onebusaway.api.model.transit.blocks.BlockInstanceV2Bean;
 import org.onebusaway.exceptions.ServiceException;
+import org.onebusaway.nyc.transit_data.services.NycTransitDataService;
 import org.onebusaway.transit_data.model.blocks.BlockInstanceBean;
 import org.onebusaway.transit_data.services.TransitDataService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -37,7 +38,7 @@ public class BlockInstanceAction extends ApiActionSupport {
   private static final int V2 = 2;
 
   @Autowired
-  private TransitDataService _service;
+  private NycTransitDataService _service;
 
   private String _id;
 
@@ -75,7 +76,7 @@ public class BlockInstanceAction extends ApiActionSupport {
     if (blockInstance == null)
       return setResourceNotFoundResponse();
 
-    BeanFactoryV2 factory = getBeanFactoryV2();
+    BeanFactoryV2 factory = getBeanFactoryV2(_service);
     BlockInstanceV2Bean bean = factory.getBlockInstance(blockInstance);
     EntryWithReferencesBean<BlockInstanceV2Bean> response = factory.entry(bean);
     return setOkResponse(response);

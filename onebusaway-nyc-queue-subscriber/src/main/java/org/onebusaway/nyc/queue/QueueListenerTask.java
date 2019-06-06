@@ -86,9 +86,10 @@ public abstract class QueueListenerTask {
 		@Override
 		public void run() {
 		  _log.warn("ReadThread for queue " + getQueueName() + " starting");
-		  
+
 			while (!Thread.currentThread().isInterrupted()) {
-			  _zmqPoller.poll(1000 * 1000); // microseconds for 2.2, milliseconds for 3.0
+				// prefer a java sleep to a native block
+				_zmqPoller.poll(0 * 1000); // microseconds for 2.2, milliseconds for 3.0
 				if (_zmqPoller.pollin(0)) {
 
 					String address = new String(_zmqSocket.recv(0));
@@ -103,6 +104,13 @@ public abstract class QueueListenerTask {
 					}
 						
 					Thread.yield();
+				} else {
+					try {
+						Thread.sleep(100);
+					} catch (InterruptedException e) {
+						_log.warn("exiting (interrupted) " + getQueueName());
+						return;
+					}
 				}
 
 				if (processedCount > _countInterval) {
@@ -119,7 +127,7 @@ public abstract class QueueListenerTask {
 
 				
 			}
-			_log.error("Thread loop Interrupted, exiting");
+			_log.error("Thread loop Interrupted, exiting queue " + getQueueName());
 		}
 	}
 
@@ -133,7 +141,10 @@ public abstract class QueueListenerTask {
 
 	@PreDestroy
 	public void destroy() {
+		_log.info("destroy " + getQueueName());
 		_executorService.shutdownNow();
+		if (_taskScheduler != null)
+			_taskScheduler.shutdown();
 	}
 
 	protected void reinitializeQueue() {

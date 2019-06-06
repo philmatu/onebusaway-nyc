@@ -16,6 +16,7 @@
 package org.onebusaway.nyc.transit_data_federation.impl;
 
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
@@ -24,6 +25,7 @@ import org.onebusaway.exceptions.ServiceException;
 import org.onebusaway.geospatial.model.CoordinateBounds;
 import org.onebusaway.geospatial.model.CoordinatePoint;
 import org.onebusaway.geospatial.model.EncodedPolylineBean;
+import org.onebusaway.gtfs.model.AgencyAndId;
 import org.onebusaway.nyc.transit_data.services.NycTransitDataService;
 import org.onebusaway.nyc.transit_data_federation.impl.nyc.BundleSearchServiceImpl;
 import org.onebusaway.nyc.transit_data_federation.model.bundle.BundleItem;
@@ -31,6 +33,7 @@ import org.onebusaway.nyc.transit_data_federation.services.bundle.BundleManageme
 import org.onebusaway.nyc.transit_data_federation.services.predictions.PredictionIntegrationService;
 import org.onebusaway.nyc.transit_data_federation.services.schedule.ScheduledServiceService;
 import org.onebusaway.realtime.api.TimepointPredictionRecord;
+import org.onebusaway.realtime.api.VehicleOccupancyRecord;
 import org.onebusaway.transit_data.model.AgencyBean;
 import org.onebusaway.transit_data.model.AgencyWithCoverageBean;
 import org.onebusaway.transit_data.model.ArrivalAndDepartureBean;
@@ -82,18 +85,24 @@ import org.onebusaway.transit_data.model.trips.TripsForAgencyQueryBean;
 import org.onebusaway.transit_data.model.trips.TripsForBoundsQueryBean;
 import org.onebusaway.transit_data.model.trips.TripsForRouteQueryBean;
 import org.onebusaway.transit_data.services.TransitDataService;
-import org.onebusaway.transit_data_federation.services.ScheduleHelperService;
+import org.onebusaway.transit_data_federation.impl.realtime.gtfs_sometimes.service.GtfsSometimesHandler;
+import org.onebusaway.transit_data_federation.services.PredictionHelperService;
+import org.onebusaway.transit_data_federation.services.revenue.RevenueSearchService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Component;
 
-@Component
+import javax.annotation.Resource;
+
+@Primary
+@Component(value = "nycTransitDataServiceImpl")
 class NycTransitDataServiceImpl implements NycTransitDataService {
 	
 	private static Logger _log = LoggerFactory.getLogger(NycTransitDataServiceImpl.class);
 
-	@Autowired
+	@Resource
 	private TransitDataService _transitDataService;
 
 	@Autowired
@@ -108,6 +117,15 @@ class NycTransitDataServiceImpl implements NycTransitDataService {
 	@Autowired
 	private BundleSearchServiceImpl _bundleSearchService;
 
+	@Autowired
+	private PredictionHelperService _predictionHelperService;
+	
+	@Autowired
+	private RevenueSearchService _revenueSearchService;
+
+	@Autowired(required = false)
+	private GtfsSometimesHandler _gtfsSometimesHandler;
+
 	private int _blockedRequestCounter = 0;
 
 	/**
@@ -117,12 +135,18 @@ class NycTransitDataServiceImpl implements NycTransitDataService {
 	 */
 	private void blockUntilBundleIsReady() {
 		try {
-			while(_bundleManagementService != null && !_bundleManagementService.bundleIsReady()) {
+			boolean gtfsSometimes = false;
+			while((_bundleManagementService != null && !_bundleManagementService.bundleIsReady())
+					|| (_gtfsSometimesHandler != null && (gtfsSometimes = _gtfsSometimesHandler.isApplying()))) {
 				_blockedRequestCounter++;
 
 				// only print this every 25 times so we don't fill up the logs!
 				if(_blockedRequestCounter > 25) {
-					_log.warn("Bundle is not ready or none is loaded--we've blocked 25 TDS requests since last log event.");
+					if (gtfsSometimes) {
+						_log.warn("GTFS-sometimes application in progress--we've blocked 25 TDS requests since last log event.");
+					} else {
+						_log.warn("Bundle is not ready or none is loaded--we've blocked 25 TDS requests since last log event.");
+					}
 					_blockedRequestCounter = 0;
 				}
 
@@ -144,13 +168,28 @@ class NycTransitDataServiceImpl implements NycTransitDataService {
 	public List<TimepointPredictionRecord> getPredictionRecordsForTrip(String agencyId,
 			TripStatusBean tripStatus) {
 		blockUntilBundleIsReady();
-		return _predictionIntegrationService.getPredictionsForTrip(tripStatus);
+		if (_predictionIntegrationService.isEnabled()) {
+			return _predictionIntegrationService.getPredictionsForTrip(tripStatus);
+		}
+		return _predictionHelperService.getPredictionRecordsForTrip(agencyId, tripStatus);
 	}
 	
-	public List<TimepointPredictionRecord> getPredictionRecordsForVehicleAndTrip(String VehicleId,
-			String TripId) {
+	public List<TimepointPredictionRecord> getPredictionRecordsForVehicleAndTripStatus(String vehicleId,
+																					   TripStatusBean tripStatus) {
 		blockUntilBundleIsReady();
-		return _predictionIntegrationService.getPredictionRecordsForVehicleAndTrip(VehicleId, TripId);
+		if (_predictionIntegrationService.isEnabled()) {
+				return _predictionIntegrationService.getPredictionRecordsForVehicleAndTrip(vehicleId, tripStatus.getActiveTrip().getId());
+			}
+			return _predictionHelperService.getPredictionRecordsForVehicleAndTrip(vehicleId, tripStatus);
+	}
+
+	public List<TimepointPredictionRecord> getPredictionRecordsForVehicleAndTrip(String vehicleId,
+																				 String tripId) {
+		blockUntilBundleIsReady();
+		if (_predictionIntegrationService.isEnabled()) {
+			return _predictionIntegrationService.getPredictionRecordsForVehicleAndTrip(vehicleId, tripId);
+		}
+		return Collections.emptyList();
 	}
 
 	@Override
@@ -581,6 +620,22 @@ class NycTransitDataServiceImpl implements NycTransitDataService {
 	}
 
 	@Override
+	public void addVehicleOccupancyRecord(VehicleOccupancyRecord vehicleOccupancyRecord) {
+		_transitDataService.addVehicleOccupancyRecord(vehicleOccupancyRecord);
+	}
+
+
+	@Override
+	public VehicleOccupancyRecord getLastVehicleOccupancyRecordForVehicleId(AgencyAndId vehicleId) {
+		return _transitDataService.getLastVehicleOccupancyRecordForVehicleId(vehicleId);
+	}
+
+	@Override
+	public VehicleOccupancyRecord getVehicleOccupancyRecordForVehicleIdAndRoute(AgencyAndId vehicleId, String routeId, String directionId) {
+		return _transitDataService.getVehicleOccupancyRecordForVehicleIdAndRoute(vehicleId, routeId, directionId);
+	}
+
+	@Override
 	public void submitVehicleLocation(VehicleLocationRecordBean arg0) {
 		blockUntilBundleIsReady();
 		_transitDataService.submitVehicleLocation(arg0);    
@@ -606,12 +661,11 @@ class NycTransitDataServiceImpl implements NycTransitDataService {
 
 	@Override
 	public Boolean stopHasRevenueServiceOnRoute(String agencyId, String stopId, String routeId, String directionId) {
-		return _scheduledServiceService.stopHasRevenueServiceOnRoute(agencyId, stopId, routeId, directionId);
+	  return _revenueSearchService.stopHasRevenueServiceOnRoute(agencyId, stopId, routeId, directionId);
 	}
 
 	@Override
 	public Boolean stopHasRevenueService(String agencyId, String stopId) {
-		return _scheduledServiceService.stopHasRevenueService(agencyId, stopId); 
+	  return _revenueSearchService.stopHasRevenueService(agencyId, stopId);
 	}
-
 }

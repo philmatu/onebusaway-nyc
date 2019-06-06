@@ -369,6 +369,18 @@ public class VehicleLocationSimulationController {
     return new ModelAndView("vehicle-location-simulation-results-view.jspx", m);
   }
 
+  @RequestMapping(value = "/vehicle-location-simulation!task-view-result-records2.do", method = RequestMethod.GET)
+  public ModelAndView taskResultsView2(@RequestParam() int taskId) {
+
+    List<NycTestInferredLocationRecord> records = _vehicleLocationSimulationService.getResultRecords(taskId);
+    String filename = _vehicleLocationSimulationService.getSimulation(taskId).getFilename();
+    Map<String, Object> m = new HashMap<String, Object>();
+    m.put("records", records);
+    m.put("taskId", taskId);
+    m.put("filename", filename);
+    return new ModelAndView("vehicle-location-simulation-results-view2.jspx", m);
+  }
+
   @RequestMapping(value = "/vehicle-location-simulation!task-result-records.do", method = RequestMethod.GET)
   public void taskParticles(@RequestParam() int taskId,
       HttpServletResponse response) throws IOException {
@@ -476,7 +488,7 @@ public class VehicleLocationSimulationController {
   public ModelAndView activeBlocksAndRecordsForTask(@RequestParam() int taskId,
       HttpServletResponse response) throws IOException {
 
-    return new ModelAndView("vehicle-location-simulation-map.jspx", null);
+    return new ModelAndView("vehicle-location-simulation-map.jspx");
   }
   
   @RequestMapping(value = "/vehicle-location-simulation!block.do", method = RequestMethod.GET)

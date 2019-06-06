@@ -12,8 +12,10 @@ import org.codehaus.jackson.JsonGenerationException;
 import org.codehaus.jackson.JsonParseException;
 import org.codehaus.jackson.map.JsonMappingException;
 import org.codehaus.jackson.map.ObjectMapper;
+import org.hibernate.HibernateException;
 import org.hibernate.SessionFactory;
 import org.onebusaway.nyc.transit_data_manager.config.model.jaxb.Message;
+import org.onebusaway.nyc.transit_data_manager.persistence.service.SystemLogPersistenceService;
 import org.onebusaway.nyc.transit_data_manager.util.DateUtility;
 import org.onebusaway.nyc.transit_data_manager.util.ObjectMapperProvider;
 import org.slf4j.Logger;
@@ -21,8 +23,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Scope;
-import org.springframework.orm.hibernate3.HibernateTemplate;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * System wide resource to provide logging service. When requested, it performs logging of caller actions
@@ -36,9 +38,11 @@ import org.springframework.stereotype.Component;
 public class SystemLogResource {
 	
 	private ObjectMapper mapper;
-	private HibernateTemplate hibernateTemplate;
 	
 	private static final Logger log = LoggerFactory.getLogger(SystemLogResource.class);
+	
+	@Autowired
+	private SystemLogPersistenceService _systemLogService;
 	
 	public SystemLogResource() {
 		mapper = ObjectMapperProvider.getObjectMapper();
@@ -59,7 +63,7 @@ public class SystemLogResource {
 			
 			SystemLogRecord logRecord = buildSystemLogRecord(logMessage);
 			
-			hibernateTemplate.saveOrUpdate(logRecord);
+			_systemLogService.saveLogRecord(logRecord);
 			
 			message.setStatus("OK");
 			
@@ -75,6 +79,10 @@ public class SystemLogResource {
 			message.setStatus("ERROR");
 			message.setMessageText("I/O error parsing message JSON content");
 			e.printStackTrace();
+		} catch(HibernateException hibernateException) {
+			message.setStatus("ERROR");
+			message.setMessageText("Error saving SystemLogRecord");
+			hibernateException.printStackTrace();
 		}
 		
 		log.info("Returning response text");
@@ -94,12 +102,6 @@ public class SystemLogResource {
 	
 	private Date getDate() {
 		return DateUtility.getTodaysDateTime();
-	}
-
-	@Autowired
-	@Qualifier("archiveSessionFactory")
-	public void setSessionFactory(SessionFactory sessionFactory) {
-		hibernateTemplate = new HibernateTemplate(sessionFactory);
 	}
 
 }

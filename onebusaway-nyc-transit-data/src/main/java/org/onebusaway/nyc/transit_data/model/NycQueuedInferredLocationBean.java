@@ -4,6 +4,9 @@ import java.io.Serializable;
 import java.math.BigDecimal;
 import java.util.Date;
 
+import org.onebusaway.gtfs.model.AgencyAndId;
+import org.onebusaway.realtime.api.EVehiclePhase;
+import org.onebusaway.realtime.api.VehicleLocationRecord;
 import org.onebusaway.transit_data.model.RouteBean;
 import org.onebusaway.transit_data.model.VehicleStatusBean;
 import org.onebusaway.transit_data.model.realtime.VehicleLocationRecordBean;
@@ -89,6 +92,8 @@ public class NycQueuedInferredLocationBean implements Serializable {
 	private String inferredDirectionId;
 	
 	private Long lastLocationUpdateTime;
+
+  private String assignedBlockId;
 	
 
 	public NycQueuedInferredLocationBean() {}
@@ -366,5 +371,45 @@ public class NycQueuedInferredLocationBean implements Serializable {
 		
 	}
 
+  public void setAssignedBlockId(String assignedBlockId) {
+    this.assignedBlockId = assignedBlockId;
+  }
+  
+  public String getAssignedBlockId() {
+    return assignedBlockId;
+  }
+
+  // from nyc-predictions VehicleLocationRecord.getVehicleLocationRecordBean()
+  public VehicleLocationRecord toVehicleLocationRecord() {
+
+	  VehicleLocationRecord vlr = new VehicleLocationRecord();
+	  vlr.setVehicleId(AgencyAndId.convertFromString(getVehicleId()));
+	  vlr.setTimeOfRecord(getRecordTimestamp());
+	  vlr.setTimeOfLocationUpdate(getRecordTimestamp());
+
+	  String blockId = (getBlockId() != null) ? getBlockId() : getInferredBlockId();
+	  vlr.setBlockId(AgencyAndId.convertFromString(blockId));
+
+	  String tripId = (getTripId() != null) ? getTripId() : getInferredTripId();
+	  vlr.setTripId(AgencyAndId.convertFromString(tripId));
+
+	  if(getServiceDate() == null){
+		vlr.setServiceDate(0);
+	  } else {
+	  	vlr.setServiceDate(getServiceDate());
+	  }
+	  vlr.setDistanceAlongBlock(getDistanceAlongBlock());
+	  vlr.setCurrentLocationLat(getInferredLatitude().doubleValue());
+	  vlr.setCurrentLocationLon(getInferredLongitude().doubleValue());
+	  vlr.setPhase(EVehiclePhase.valueOf(getPhase()));
+	  vlr.setStatus(getStatus());
+
+	  if (getScheduleDeviation() != null)
+	  	vlr.setScheduleDeviation(getScheduleDeviation().doubleValue());
+
+	  // no run ID (it's set in predictions version)
+
+	  return vlr;
+	}
 }
 

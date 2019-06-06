@@ -6,9 +6,9 @@
     governing permissions and limitations under the License. -->
 <beans xmlns="http://www.springframework.org/schema/beans" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
     xmlns:context="http://www.springframework.org/schema/context" xmlns:aop="http://www.springframework.org/schema/aop"
-    xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-2.5.xsd
-        http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context-2.5.xsd
-        http://www.springframework.org/schema/aop http://www.springframework.org/schema/aop/spring-aop-2.0.xsd">
+    xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+        http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
+        http://www.springframework.org/schema/aop http://www.springframework.org/schema/aop/spring-aop.xsd">
 
 
  <!-- Transit Data Service -->
@@ -81,17 +81,18 @@
     </bean>
     
 	<!-- quartz scheduling for PingJob -->
-	<bean name="pingJob" class="org.springframework.scheduling.quartz.JobDetailBean">
+	<bean name="pingJob" class="org.springframework.scheduling.quartz.JobDetailFactoryBean">
 		<property name="jobClass" value="org.onebusaway.nyc.admin.job.PingJob" />
 		<property name="jobDataAsMap">
 			<map>
       			<entry key="userManagementService" value-ref="userManagementServiceImpl"/>
      		</map>
 		</property>
+		<property name="durability" value="true" />
 		
 	</bean>
 	
-	<bean id="pingTrigger" class="org.springframework.scheduling.quartz.CronTriggerBean">
+	<bean id="pingTrigger" class="org.springframework.scheduling.quartz.CronTriggerFactoryBean">
 		<property name="jobDetail" ref="pingJob" />
 		<property name="cronExpression" value="0 * * * * ?" /><!--  every minute -->
 	</bean>
@@ -108,5 +109,7 @@
 	<bean id="geocoderCacheService" class="org.onebusaway.nyc.presentation.service.cache.NycGeocoderCacheServiceImpl">
 		<property name="disabled" value="${geocoder.cache.disabled}" />
 	</bean>
+	
+	<bean id="gtfsValidationService" class="org.onebusaway.nyc.admin.service.bundle.impl.JavaGtfsValidationServiceImpl" />
 	
 </beans>

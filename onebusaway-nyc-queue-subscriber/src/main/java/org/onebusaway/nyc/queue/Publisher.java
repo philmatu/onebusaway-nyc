@@ -1,10 +1,15 @@
 package org.onebusaway.nyc.queue;
 
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
+import java.util.Calendar;
 import java.util.Date;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
+import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.zeromq.ZMQ;
@@ -31,7 +36,7 @@ public class Publisher implements IPublisher {
 
 	/**
 	 * Bind ZeroMQ to the given host and port using the specified protocol.
-	 * 
+	 *
 	 * @param protocol
 	 *            "tcp" for example
 	 * @param host
@@ -73,7 +78,7 @@ public class Publisher implements IPublisher {
 	/**
 	 * Publish a message to a topic. Be aware that fist message may be lost as
 	 * subscriber will not connect in time.
-	 * 
+	 *
 	 * @param message
 	 *            the content of the message
 	 */
@@ -95,11 +100,19 @@ public class Publisher implements IPublisher {
 			return null;
 
 		StringBuffer prefix = new StringBuffer();
+		
 		prefix.append("{\"RealtimeEnvelope\": {\"UUID\":\"")
 				.append(generateUUID()).append("\",\"timeReceived\": ")
 				.append(timeReceived).append(",")
 				.append(removeLastBracket(realtime)).append("}}");
-		return prefix.toString();
+
+		try{
+			return RmcUtil.replaceInvalidRmcDateTime(prefix, timeReceived);
+		}catch(Exception e){
+			_log.warn("unable to replace invalid rmc date", e);
+			return prefix.toString();
+		}
+
 	}
 
 	String removeLastBracket(String s) {

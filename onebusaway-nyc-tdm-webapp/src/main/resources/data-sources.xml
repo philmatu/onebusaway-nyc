@@ -10,8 +10,8 @@
 <beans xmlns="http://www.springframework.org/schema/beans"
 	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:context="http://www.springframework.org/schema/context"
 	xsi:schemaLocation="
-        http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-3.0.xsd
-        http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context-3.0.xsd">
+        http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+        http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd">
 
 	<!-- never define nycTransitDataService here -->
 	<!-- it should be autowired natively -->
@@ -51,7 +51,7 @@
  	<!--  Time Queue Configuration -->
 	<!--  This option integrates with an external time prediction queue -->
 	<bean id="timeInputQueueDisable" class="org.onebusaway.nyc.transit_data_federation.impl.predictions.QueuePredictionIntegrationServiceImpl">
-	  <property name="disable" value="true"/>
+	  <property name="status" value="DISABLED"/>
 	</bean>
 	<!-- Other Stuff: -->
 	<bean class="org.onebusaway.container.spring.PropertyOverrideConfigurer">
@@ -60,6 +60,7 @@
 				<prop key="blockLocationServiceImpl.persistBlockLocationRecords">false</prop>
 				<prop key="blockLocationServiceImpl.locationInterpolation">false</prop>
 				<prop key="cacheManager.cacheManagerName">org.onebusaway.tdm_bundle_webapp.cacheManager</prop>
+				<prop key="bundleSearchServiceImpl.disableInit">true</prop>
 			</props>
 		</property>
 	</bean>
@@ -71,7 +72,7 @@
 	</bean>
 
 	<bean id="appSessionFactory"
-		class="org.springframework.orm.hibernate3.annotation.AnnotationSessionFactoryBean">
+		class="org.springframework.orm.hibernate4.LocalSessionFactoryBean">
 		<property name="dataSource" ref="dataSource" />
 		<property name="annotatedClasses">
 			<list>
@@ -85,8 +86,7 @@
 			<props>
 				<prop key="hibernate.dialect">org.hibernate.dialect.MySQLDialect</prop>
 				<prop key="hibernate.connection.pool_size">1</prop>
-				<prop key="hibernate.current_session_context_class">thread</prop>
-				<prop key="hibernate.cache.provider_class">org.hibernate.cache.NoCacheProvider</prop>
+				<prop key="hibernate.cache.provider_class">org.hibernate.cache.internal.NoCachingRegionFactory</prop>
 				<prop key="hibernate.show_sql">false</prop>
 				<prop key="hibernate.hbm2ddl.auto">validate</prop>
 				<prop key="hibernate.jdbc.batch_size">1000</prop>
@@ -95,7 +95,7 @@
 	</bean>
 
 	<bean id="archiveSessionFactory"
-		class="org.springframework.orm.hibernate3.annotation.AnnotationSessionFactoryBean">
+		class="org.springframework.orm.hibernate4.LocalSessionFactoryBean">
 		<property name="dataSource" ref="archiveDataSource" />
 		<property name="annotatedClasses">
 			<list>
@@ -109,8 +109,7 @@
 			<props>
 				<prop key="hibernate.dialect">org.hibernate.dialect.MySQLDialect</prop>
 				<prop key="hibernate.connection.pool_size">1</prop>
-				<prop key="hibernate.current_session_context_class">thread</prop>
-				<prop key="hibernate.cache.provider_class">org.hibernate.cache.NoCacheProvider</prop>
+				<prop key="hibernate.cache.provider_class">org.hibernate.cache.internal.NoCachingRegionFactory</prop>
 				<prop key="hibernate.show_sql">false</prop>
 				<prop key="hibernate.hbm2ddl.auto">validate</prop>
 				<prop key="hibernate.jdbc.batch_size">1000</prop>
@@ -119,7 +118,7 @@
 	</bean>
 
 	<!-- quartz scheduling for persistence of webservice data -->
-	<bean name="persistJob" class="org.springframework.scheduling.quartz.JobDetailBean">
+	<bean name="persistJob" class="org.springframework.scheduling.quartz.JobDetailFactoryBean">
 		<property name="jobClass" value="org.onebusaway.nyc.transit_data_manager.job.TDMDataPersisterJob" />
 		<property name="jobDataAsMap">
 			<map>
@@ -127,24 +126,26 @@
       			<entry key="depotDataPersistenceService" value-ref="depotDataPersistenceService"/>
      		</map>
 		</property>
+		<property name="durability" value="true" />
 	</bean>
 	
-	<bean id="persistTrigger" class="org.springframework.scheduling.quartz.CronTriggerBean">
+	<bean id="persistTrigger" class="org.springframework.scheduling.quartz.CronTriggerFactoryBean">
 		<property name="jobDetail" ref="persistJob" />
 		<property name="cronExpression" value="0 10 4 * * ?" />
 	</bean>
 	
-	<bean name="depotAssignsSoapQueryJob" class="org.springframework.scheduling.quartz.JobDetailBean">
+	<bean name="depotAssignsSoapQueryJob" class="org.springframework.scheduling.quartz.JobDetailFactoryBean">
 		<property name="jobClass" value="org.onebusaway.nyc.transit_data_manager.job.DepotAssignsSOAPQueryJob" />
 		<property name="jobDataAsMap">
 			<map>
 				<entry key="configurationService" value-ref="configurationService"/>
 				<entry key="depotFileDir" value-ref="depotFileDir"/>
-     		</map>
+     		</map>		
 		</property>
+		<property name="durability" value="true" />
 	</bean>
 
-	<bean id="depotAssignsSoapQueryTrigger" class="org.springframework.scheduling.quartz.CronTriggerBean">
+	<bean id="depotAssignsSoapQueryTrigger" class="org.springframework.scheduling.quartz.CronTriggerFactoryBean">
 		<property name="jobDetail" ref="depotAssignsSoapQueryJob" />
 		<property name="cronExpression" value="0 0 * * * ?" />
 	</bean>
@@ -157,4 +158,14 @@
 			</list>
 		</property>
 	</bean>
+	
+	<bean id="transactionManagerApp" class="org.springframework.orm.hibernate4.HibernateTransactionManager">
+        <property name="sessionFactory" ref="appSessionFactory" />
+        <qualifier value="appDB"/>
+    </bean>
+	
+	 <bean id="transactionManagerArchive" class="org.springframework.orm.hibernate4.HibernateTransactionManager">
+        <property name="sessionFactory" ref="archiveSessionFactory" />
+        <qualifier value="archiveDB"/>
+    </bean>
 </beans>

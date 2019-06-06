@@ -33,12 +33,14 @@ import org.onebusaway.nyc.transit_data_federation.services.nyc.BaseLocationServi
 import org.onebusaway.nyc.transit_data_federation.services.nyc.DestinationSignCodeService;
 import org.onebusaway.nyc.transit_data_federation.services.nyc.RunService;
 import org.onebusaway.nyc.transit_data_federation.services.tdm.OperatorAssignmentService;
+import org.onebusaway.nyc.transit_data_federation.services.vtw.VehiclePulloutService;
 import org.onebusaway.nyc.util.configuration.ConfigurationService;
 import org.onebusaway.nyc.vehicle_tracking.impl.inference.state.BlockStateObservation;
 import org.onebusaway.nyc.vehicle_tracking.impl.inference.state.JourneyPhaseSummary;
 import org.onebusaway.nyc.vehicle_tracking.impl.inference.state.JourneyState;
 import org.onebusaway.nyc.vehicle_tracking.impl.inference.state.MotionState;
 import org.onebusaway.nyc.vehicle_tracking.impl.inference.state.VehicleState;
+import org.onebusaway.nyc.vehicle_tracking.impl.monitoring.NullBlockStateRouteMap;
 import org.onebusaway.nyc.vehicle_tracking.impl.particlefilter.BadProbabilityParticleFilterException;
 import org.onebusaway.nyc.vehicle_tracking.impl.particlefilter.Particle;
 import org.onebusaway.nyc.vehicle_tracking.impl.particlefilter.ParticleFilter;
@@ -50,6 +52,7 @@ import org.onebusaway.nyc.vehicle_tracking.model.library.RecordLibrary;
 import org.onebusaway.nyc.vehicle_tracking.model.simulator.VehicleLocationDetails;
 import org.onebusaway.realtime.api.EVehiclePhase;
 import org.onebusaway.transit_data_federation.services.AgencyAndIdLibrary;
+import org.onebusaway.transit_data_federation.services.blocks.BlockCalendarService;
 import org.onebusaway.transit_data_federation.services.blocks.BlockInstance;
 import org.onebusaway.transit_data_federation.services.blocks.ScheduledBlockLocation;
 import org.onebusaway.transit_data_federation.services.transit_graph.BlockConfigurationEntry;
@@ -59,7 +62,6 @@ import org.onebusaway.transit_data_federation.services.transit_graph.TripEntry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-
 import com.google.common.collect.HashMultiset;
 import com.google.common.collect.Multiset;
 import com.google.common.collect.Sets;
@@ -84,6 +86,10 @@ public class VehicleInferenceInstance {
 
   private RunService _runService;
 
+  private VehiclePulloutService _pulloutService;
+
+  private BlockCalendarService _blockCalendarService;
+
   private long _automaticResetWindow = 20 * 60 * 1000;
 
   private Observation _previousObservation = null;
@@ -99,6 +105,9 @@ public class VehicleInferenceInstance {
   private Multiset<Particle> _badParticles;
 
   private ParticleFilter<Observation> _particleFilter;
+  
+  @Autowired
+  private NullBlockStateRouteMap _nullBlockStateRouteMap;
 
   public void setModel(ParticleFilterModel<Observation> model) {
     _particleFilter = new ParticleFilter<Observation>(model);
@@ -107,6 +116,16 @@ public class VehicleInferenceInstance {
   @Autowired
   public void setRunService(RunService runService) {
     _runService = runService;
+  }
+
+  @Autowired
+  public void setPulloutService(VehiclePulloutService pulloutService) {
+    _pulloutService = pulloutService;
+  }
+
+  @Autowired
+  public void setBlockCalendarService(BlockCalendarService blockCalendarService) {
+    _blockCalendarService = blockCalendarService;
   }
 
   @Autowired
@@ -218,7 +237,7 @@ public class VehicleInferenceInstance {
        * to replace the missing values
        */
       if (_previousObservation == null) {
-        _log.info("missing previous observation and current lat/lon:"
+        _log.debug("missing previous observation and current lat/lon:"
             + record.getVehicleId() + ", skipping update.");
         return false;
       }
@@ -273,11 +292,36 @@ public class VehicleInferenceInstance {
       runResults = updateRunIdMatches(record,
           _previousObservation.getRunResults());
     }
-
+    
+    final AgencyAndId vehicleId = record.getVehicleId();
+    String assignedBlockId = null;
+    String agencyId = null;
+    String blockId = null;
+    
+    if(vehicleId != null){
+      agencyId = vehicleId.getAgencyId();
+      assignedBlockId = _pulloutService.getAssignedBlockId(vehicleId);
+      blockId = assignedBlockId;
+    }
+    
+    BlockInstance blockInstance = null;
+    if (agencyId != null && assignedBlockId != null) {
+      ServiceDate serviceDate = new ServiceDate(new Date(timestamp));
+      try {
+        blockInstance = _blockCalendarService.getBlockInstance(
+                AgencyAndId.convertFromString(blockId),
+                serviceDate.getAsDate().getTime());
+        _log.debug("VehicleInferenceInstance: blockInstance: " + blockInstance);
+      } catch (IllegalArgumentException iae){
+        _log.warn("Invalid Assigned Block Id", iae);
+      }
+    }
+    boolean hasValidAssignedBlockId = (blockInstance != null);
+    
     final Observation observation = new Observation(timestamp, record,
         lastValidDestinationSignCode, atBase, atTerminal, outOfService,
-        hasValidDsc, _previousObservation, routeIds, runResults);
-
+        hasValidDsc, _previousObservation, routeIds, runResults, assignedBlockId, hasValidAssignedBlockId);
+    
     if (_previousObservation != null)
       _previousObservation.clearPreviousObservation();
 
@@ -445,6 +489,27 @@ public class VehicleInferenceInstance {
           - activeTrip.getDistanceAlongBlock();
       record.setDistanceAlongTrip(distanceAlongTrip);
     }
+    else if (obs != null && obs.hasValidDsc()){
+    	try{
+    		final int dsc = Integer.valueOf(obs.getRecord().getDestinationSignCode());
+    		if(dsc > 50){
+    			_nullBlockStateRouteMap.increment(obs.getRecord().getDestinationSignCode());
+	        	_log.debug("[\n"
+	    			+ "OpAssigned Run Id : " + obs.getOpAssignedRunId() + ",\n"
+	    			+ "Dest Sign Code : " +  obs.getRecord().getDestinationSignCode() + ",\n"
+	    			+ "Operator : " +  obs.getRecord().getOperatorId() + ",\n"
+	    			+ "Distance Moved : " +  obs.getDistanceMoved() + ",\n"
+	    			+ "Operator Id : " + obs.getRecord().getOperatorId() + ",\n"
+	    			+ "Vehicle Id : " + obs.getRecord().getVehicleId() + ",\n"
+	    			+ "Run Route Id : " + obs.getRecord().getRunRouteId() + "\n"
+	    			+ "]");
+    		}
+
+    	} catch(NumberFormatException nfe){
+    		_log.warn("Unable to convert DSC: " + obs.getRecord().getDestinationSignCode() + " into an integer.");
+    	}
+  	  
+    }
 
     return record;
   }
@@ -466,6 +531,7 @@ public class VehicleInferenceInstance {
     record.setLastUpdateTime(_lastUpdateTime);
     record.setLastLocationUpdateTime(_lastLocationUpdateTime);
     record.setAssignedRunId(obs.getOpAssignedRunId());
+    record.setAssignedBlockId(obs.getAssignedBlockId());
     record.setMostRecentObservedDestinationSignCode(nycRawRecord.getDestinationSignCode());
     record.setLastObservedLatitude(nycRawRecord.getLatitude());
     record.setLastObservedLongitude(nycRawRecord.getLongitude());
@@ -657,6 +723,8 @@ public class VehicleInferenceInstance {
     record.setOperatorId(nycRecord.getOperatorId());
     record.setReportedRunId(RunTripEntry.createId(nycRecord.getRunRouteId(),
         nycRecord.getRunNumber()));
+    
+    record.setAssignedBlockId(obs.getAssignedBlockId());
 
     final EVehiclePhase phase = journeyState.getPhase();
     if (phase != null)

@@ -1,8 +1,8 @@
 <beans xmlns="http://www.springframework.org/schema/beans"
   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:context="http://www.springframework.org/schema/context"
   xsi:schemaLocation="
-   http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-2.5.xsd
-   http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context-2.5.xsd">
+   http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+   http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd">
 
   <import resource="classpath:org/onebusaway/nyc/transit_data_federation/application-context.xml" />
   <context:component-scan base-package="org.onebusaway.nyc.transit_data_manager.api" />
@@ -32,6 +32,7 @@
         <prop key="tdm.depotAssignsDownloadDir">${tdm.depotAssignsDownloadDir}</prop>
         <prop key="tdm.dscFilesDir">${tdm.dscFilesDir}</prop>
         <prop key="tdm.pipoFilename">${tdm.pipoFilename}</prop>
+        <prop key="tdm.rtPipoFilename">${tdm.rtPipoFilename}</prop>
         <prop key="tdm.depotIdTranslationFile">${tdm.depotIdTranslationConfigFile}</prop>
         <prop key="tdm.prettyPrintOutput">${tdm.prettyPrintOutput}</prop>
         <prop key="tdm.vehiclepipoUploadDir">${tdm.vehiclepipoUploadDir}</prop>
@@ -124,5 +125,7 @@
   <bean id="vehicleAndCrewDataPersistenceService" class="org.onebusaway.nyc.transit_data_manager.persistence.service.impl.VehicleAndCrewDataPersistenceServiceImpl" />
   
   <bean id="depotDataPersistenceService" class="org.onebusaway.nyc.transit_data_manager.persistence.service.impl.DepotDataPersistenceServiceImpl" />
+  
+  <bean id="systemLogPersistenceService" class="org.onebusaway.nyc.transit_data_manager.persistence.service.impl.SystemLogPersistenceServiceImpl" />
   
 </beans>
